@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# Copyright (C) 2020 National University of Singapore
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+if [ -t 1 ]
+then
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BOLD="\033[1m"
+    OFF="\033[0m"
+else
+    RED=
+    GREEN=
+    YELLOW=
+    BOLD=
+    OFF=
+fi
+
+usage()
+{
+    echo -e "${RED}usage${OFF}: $0 [OPTIONS] /path/to/binary" >&2
+    echo >&2
+    echo "OPTIONS:" >&2
+    echo "    -t" >&2
+    echo "        Generate SIGTRAP for each trampoline entry (for debugging)" >&2
+    echo >&2
+    exit 1
+}
+
+TRAP_ALL=
+while getopts "t" OPTION
+do
+    case "$OPTION"
+    in
+        t)
+            TRAP_ALL=--trap-all
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+shift $((OPTIND-1))
+if [ $# != 1 ]
+then
+	usage
+fi
+
+BINARY=`which "$1"`
+BASENAME=`basename "$BINARY"`
+echo -e "${GREEN}$0${OFF}: adding AFL instrumentation to $BINARY..."
+echo "./e9tool --match 'plugin[e9afl]' --action 'plugin[e9afl]' --option --experimental -o $BASENAME.afl $TRAP_ALL"
+./e9tool --match 'plugin[e9afl]' --action 'plugin[e9afl]' \
+	--option --experimental -o "$BASENAME.afl" "$BINARY" $TRAP_ALL
+
