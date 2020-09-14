@@ -61,9 +61,9 @@ static const char *getenv(char *name, const char **envp)
 {
     const char *entry;
     for (unsigned i = 0; (entry = envp[i]) != NULL; i++)
-	{
+    {
         unsigned j;
-		for (j = 0; name[j] == entry[j]; j++)
+        for (j = 0; name[j] == entry[j]; j++)
             ;
         if (name[j] == '\0' && entry[j] == '=')
             return entry + j + 1;
@@ -326,7 +326,7 @@ void init(int argc, const char **argv, const char **envp)
  *
  * USAGE:
  *      E9AFL_NO_INSTRUMENT=1 ./e9tool -M 'plugin[e9afl]' \
- *               -A 'call entry(addr)@"afl-rt"' \
+ *               -A 'call entry(random)@"afl-rt"' \
  *               path/to/binary
  */
 void entry(uint32_t curr_loc)

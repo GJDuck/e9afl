@@ -64,11 +64,11 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
         return nullptr;
     }
 
-	// Send the AFL runtime:
+    // Send the AFL runtime:
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
     sendELFFileMessage(out, rt, /*absolute=*/true);
 
-	// Send the AFL instrumentation:
+    // Send the AFL instrumentation:
     //
     // Save state:
     //
@@ -86,7 +86,7 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
     code << 0x9f << ',';
     code << 0x50 << ',';
 
-	// AFL instrumentation:
+    // AFL instrumentation:
     //
     // mov %fs:0x48,%eax                    // mov prev_loc,%eax
     // xor $curr_loc,%eax
@@ -139,14 +139,14 @@ extern void e9_plugin_instr_v1(FILE *out, const e9frontend::ELF *elf,
         alive = true;
     }
 
-	/*
+    /*
      * We aim to instrument:
      *
      * ^main:      - function entry point (always instrumented)
      * ^.L0:       - branch label
      * ^.LBB0_0:   - branch label
      * ^\tjnz foo  - conditional branches
-	 */
+     */
     const cs_detail *detail = I->detail;
     switch (I->id)
     {
@@ -227,7 +227,7 @@ extern void e9_plugin_patch_v1(FILE *out, const e9frontend::ELF *elf,
         return;
 
     Metadata metadata[3];
-	int32_t curr_loc = rand() & 0xFFFF;
+    int32_t curr_loc = rand() & 0xFFFF;
 
     metadata[0].name = "curr_loc";
     std::string buf;

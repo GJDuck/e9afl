@@ -35,6 +35,8 @@ usage()
     echo -e "${RED}usage${OFF}: $0 [OPTIONS] /path/to/binary" >&2
     echo >&2
     echo "OPTIONS:" >&2
+    echo "    -c N" >&2
+    echo "        Use compression level N" >&2
     echo "    -t" >&2
     echo "        Generate SIGTRAP for each trampoline entry (for debugging)" >&2
     echo >&2
@@ -42,12 +44,16 @@ usage()
 }
 
 TRAP_ALL=
-while getopts "t" OPTION
+COMPRESS=7
+while getopts "c:t" OPTION
 do
     case "$OPTION"
     in
         t)
             TRAP_ALL=--trap-all
+            ;;
+        c)
+            COMPRESS=$OPTARG
             ;;
         *)
             usage
@@ -58,13 +64,14 @@ done
 shift $((OPTIND-1))
 if [ $# != 1 ]
 then
-	usage
+    usage
 fi
 
 BINARY=`which "$1"`
 BASENAME=`basename "$BINARY"`
 echo -e "${GREEN}$0${OFF}: adding AFL instrumentation to $BINARY..."
-echo "./e9tool --match 'plugin[e9afl]' --action 'plugin[e9afl]' --option --experimental -o $BASENAME.afl $TRAP_ALL"
+echo "./e9tool --match 'plugin[e9afl]' --action 'plugin[e9afl]' --option --experimental -o $BASENAME.afl -c $COMPRESS $TRAP_ALL"
 ./e9tool --match 'plugin[e9afl]' --action 'plugin[e9afl]' \
-	--option --experimental -o "$BASENAME.afl" "$BINARY" $TRAP_ALL
+    --option --experimental -o "$BASENAME.afl" "$BINARY" \
+    $TRAP_ALL -c $COMPRESS
 
