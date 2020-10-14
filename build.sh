@@ -32,26 +32,28 @@ fi
 
 set -e
 
+VERSION=0471829fd65f1d7c4ee5ac01682d84d04765061f
+
 # STEP (1): install e9patch if necessary:
 if [ ! -x ./e9patch ]
 then
-    if [ ! -f e9patch-master.zip ]
+    if [ ! -f e9patch-$VERSION.zip ]
     then
-        echo -e "${GREEN}$0${OFF}: downloading e9patch-master.zip..."
-        wget -O e9patch-master.zip https://github.com/GJDuck/e9patch/archive/master.zip
+        echo -e "${GREEN}$0${OFF}: downloading e9patch-$VERSION.zip..."
+        wget -O e9patch-$VERSION.zip https://github.com/GJDuck/e9patch/archive/$VERSION.zip
     fi
 
-    echo -e "${GREEN}$0${OFF}: extracting e9patch-master.zip..."
-    unzip e9patch-master.zip
+    echo -e "${GREEN}$0${OFF}: extracting e9patch-$VERSION.zip..."
+    unzip e9patch-$VERSION.zip
 
     echo -e "${GREEN}$0${OFF}: building e9patch..."
-    cd e9patch-master
+    cd e9patch-$VERSION
     ./build.sh
     cd ..
-    ln -f -s e9patch-master/e9patch
-    ln -f -s e9patch-master/e9tool
-    ln -f -s e9patch-master/e9compile.sh
-    ln -f -s e9patch-master/capstone
+    ln -f -s e9patch-$VERSION/e9patch
+    ln -f -s e9patch-$VERSION/e9tool
+    ln -f -s e9patch-$VERSION/e9compile.sh
+    ln -f -s e9patch-$VERSION/capstone
     echo -e "${GREEN}$0${OFF}: e9patch has been built..."
 else
 	echo -e "${GREEN}$0${OFF}: using existing e9patch..."
@@ -61,7 +63,7 @@ fi
 echo -e "${GREEN}$0${OFF}: building the e9afl plugin..."
 echo "g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp -I . -I capstone/include/"
 g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp \
-    -I e9patch-master -I capstone/include/
+    -I e9patch-$VERSION/src/e9tool/ -I capstone/include/
 
 # STEP (3): build the runtime:
 echo -e "${GREEN}$0${OFF}: building the e9afl runtime..."

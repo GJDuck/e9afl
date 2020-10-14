@@ -28,6 +28,7 @@
  * Gregory J. Duck
  */
 
+#define double long
 #define getenv __dummy_getenv
 #define atoi   __dummy_atoi
 #include <errno.h>
