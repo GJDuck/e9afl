@@ -273,7 +273,7 @@ static void __afl_start_forkserver(void)
         if (was_killed)
         {
             if ((err = waitpid(child_pid, &status, 0)) < 0)
-                error("failed to wait for child process (errno=%d)", err);
+                log("failed to wait for child process (errno=%d)", err);
         }
 
         /*
