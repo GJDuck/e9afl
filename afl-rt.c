@@ -95,8 +95,8 @@ static void __afl_map_shm(void)
 
     /* Whooooops. */
     if (afl_area_ptr != (intptr_t)AREA_BASE)
-        error("failed to map AFL area (shm_id=%s, errno=%d)", id_str,
-            (int)afl_area_ptr);
+        error("failed to map AFL area (shm_id=%s): %s", id_str,
+            strerror(errno));
 }
 
 /* Fork server logic. */
@@ -118,16 +118,16 @@ static void __afl_start_forkserver(void)
          * Wait for parent by reading from the pipe. Abort if read fails.
          */
         uint32_t was_killed;
-        int err;
-        if ((err = read(FORKSRV_FD, &was_killed, sizeof(was_killed))) !=
-                sizeof(was_killed))
-            error("failed to read from the fork server pipe (errno=%d)", err);
+        if (read(FORKSRV_FD, &was_killed, sizeof(was_killed))
+                != sizeof(was_killed))
+            error("failed to read from the fork server pipe: %s",
+                strerror(errno));
 
         int status = 0;
         if (was_killed)
         {
-            if ((err = waitpid(child_pid, &status, 0)) < 0)
-                log("failed to wait for child process (errno=%d)", err);
+            if (waitpid(child_pid, &status, 0) < 0)
+                log("failed to wait for child process: %s", strerror(errno));
         }
 
         /*
@@ -135,7 +135,7 @@ static void __afl_start_forkserver(void)
          */
         child_pid = fork();
         if (child_pid < 0)
-            error("failed to fork process (errno=%d)", child_pid);
+            error("failed to fork process: %s", strerror(errno));
 
         /*
          * In child process: close fds, resume execution.
@@ -150,20 +150,19 @@ static void __afl_start_forkserver(void)
         /*
          * In parent process: write PID to pipe, then wait for child.
          */
-        if ((err = write(FORKSRV_FD + 1, &child_pid, sizeof(child_pid)))
+        if (write(FORKSRV_FD + 1, &child_pid, sizeof(child_pid))
                 != sizeof(child_pid))
-            error("failed to write child pid to the fork server pipe "
-                "(errno=%d)", err);
-        if ((err = waitpid(child_pid, &status, 0)) < 0)
-            log("failed to wait for the child process (errno=%d)", err);
+            error("failed to write child pid to the fork server pipe: %s",
+                strerror(errno));
+        if (waitpid(child_pid, &status, 0) < 0)
+            log("failed to wait for the child process: %s", strerror(errno));
 
         /*
          * Relay wait status to pipe, then loop back.
          */
-        if ((err = write(FORKSRV_FD + 1, &status, sizeof(status)))
-                != sizeof(status)) 
-            error("failed to write child status to the fork server pipe "
-                "(errno=%d)", err);
+        if (write(FORKSRV_FD + 1, &status, sizeof(status)) != sizeof(status)) 
+            error("failed to write child status to the fork server pipe: %s",
+                strerror(errno));
     }
 }
 
