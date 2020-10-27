@@ -32,10 +32,10 @@ fi
 
 set -e
 
-VERSION=0471829fd65f1d7c4ee5ac01682d84d04765061f
+VERSION=92a111ba3008b5f7e0efe4862ac6c4808d80f55a
 
 # STEP (1): install e9patch if necessary:
-if [ ! -x ./e9patch ]
+if [ ! -x e9patch-$VERSION/e9patch ]
 then
     if [ ! -f e9patch-$VERSION.zip ]
     then
@@ -54,6 +54,7 @@ then
     ln -f -s e9patch-$VERSION/e9tool
     ln -f -s e9patch-$VERSION/e9compile.sh
     ln -f -s e9patch-$VERSION/capstone
+    ln -f -s e9patch-$VERSION/examples/stdlib.c
     echo -e "${GREEN}$0${OFF}: e9patch has been built..."
 else
 	echo -e "${GREEN}$0${OFF}: using existing e9patch..."

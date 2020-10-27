@@ -28,180 +28,26 @@
  * Gregory J. Duck
  */
 
-#define double long
-#define getenv __dummy_getenv
-#define atoi   __dummy_atoi
-#include <errno.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <signal.h>
-#include <string.h>
-
-#include <sys/mman.h>
-#include <sys/shm.h>
-#include <sys/wait.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#undef getenv
-#undef atoi
-
-#define _GNU_SOURCE
-#include <unistd.h>
-#include <sys/syscall.h>
+#include "stdlib.c"
 
 #define FORKSRV_FD  198
 #define AREA_BASE   ((uint8_t *)0x200000)
 #define AREA_SIZE   ((size_t)1 << 16)
 
-static const char *getenv(char *name, const char **envp)
-{
-    const char *entry;
-    for (unsigned i = 0; (entry = envp[i]) != NULL; i++)
-    {
-        unsigned j;
-        for (j = 0; name[j] == entry[j]; j++)
-            ;
-        if (name[j] == '\0' && entry[j] == '=')
-            return entry + j + 1;
-    }
-
-    return NULL;
-}
-
-static int atoi(const char *str)
-{
-    bool neg = (str[0] == '-');
-    str = (neg? str+1: str);
-    int x = 0;
-    while (*str >= '0' && *str <= '9')
-    {
-        x *= 10;
-        x += (int)(*str++ - '0');
-    }
-    return (neg? -x: x);
-}
-
-/*
- * System call implementation.
- */
-#define STRING(x)   STRING_2(x)
-#define STRING_2(x) #x
-asm
-(
-    ".globl syscall\n"
-    "syscall:\n"
-
-    // Disallow syscalls that MUST execute in the original context:
-    "cmp $" STRING(SYS_rt_sigreturn) ",%eax\n"
-    "je .Lno_sys\n"
-    "cmp $" STRING(SYS_clone) ",%eax\n"
-    "je .Lno_sys\n"
-
-    // Convert SYSV -> SYSCALL ABI:
-    "mov %edi,%eax\n"
-    "mov %rsi,%rdi\n"
-    "mov %rdx,%rsi\n"
-    "mov %rcx,%rdx\n"
-    "mov %r8,%r10\n"
-    "mov %r9,%r8\n"
-    "mov 0x8(%rsp),%r9\n"
-
-    // Execute the system call:
-    "syscall\n"
-
-    "retq\n"
-
-    // Handle errors:
-    ".Lno_sys:\n"
-    "mov $-" STRING(ENOSYS) ",%eax\n"
-    "retq\n"
-);
-
-#define exit(...)      syscall(SYS_exit, ##__VA_ARGS__)
-#define open(...)      syscall(SYS_open, ##__VA_ARGS__)
-#define close(...)     syscall(SYS_close, ##__VA_ARGS__)
-#define read(...)      syscall(SYS_read, ##__VA_ARGS__)
-#define write(...)     syscall(SYS_write, ##__VA_ARGS__)
-#define fork(...)      syscall(SYS_fork, ##__VA_ARGS__)
-#define shmat(...)     syscall(SYS_shmat, ##__VA_ARGS__)
-#define kill(...)      syscall(SYS_kill, ##__VA_ARGS__)
-#define mmap(...)      syscall(SYS_mmap, ##__VA_ARGS__)
-#define waitpid(pid, status, options)                               \
-    syscall(SYS_wait4, (pid), (status), (options), NULL)
+static FILE *log = NULL;
 
 static void print_message(bool fatal, const char *msg, ...)
 {
     va_list ap;
     va_start(ap, msg);
-    char buf[BUFSIZ+1];
-    size_t i = 0;
-    for (size_t len = 0; msg[len] != '\0'; len++)
-    {
-        if (msg[len] == '%')
-        {
-            len++;
-            switch (msg[len])
-            {
-                case '\0':
-                    break;
-                case 'd':
-                {
-                    int x = va_arg(ap, int);
-                    if (x == 0)
-                    {
-                        buf[i++] = '0';
-                        break;
-                    }
-                    if (x < 0)
-                        buf[i++] = '-';
-                    x = (x < 0? -x: x);
-                    bool seen = false;
-                    int r = 1000000000;
-                    while (r != 0)
-                    {
-                        char c = '0' + x / r;
-                        x %= r;
-                        r /= 10;
-                        if (!seen && c == '0')
-                            continue;
-                        seen = true;
-                        buf[i++] = c;
-                    }
-                    break;
-                }
-                case 's':
-                {
-                    const char *s = va_arg(ap, const char *);
-                    if (s == NULL)
-                        break;
-                    while (*s)
-                        buf[i++] = *s++;
-                    break;
-                }
-                default:
-                    buf[i++] = msg[len];
-                    break;
-            }
-            continue;
-        }
-        buf[i++] = msg[len];
-    }
-
-    int fd = open("/tmp/e9afl.log", O_WRONLY | O_CREAT | O_APPEND,
-        S_IRUSR | S_IWUSR);
-    if (fd > 0)
-    {
-        write(fd, buf, i);
-        close(fd);
-    }
-
+    if (log == NULL)
+        log = fopen("/tmp/e9afl.log", "a");
+    if (log == NULL)
+        return;
+    vfprintf(log, msg, ap);
     if (fatal)
-        asm("ud2");
+        abort();
+    va_end(ap);
 }
 
 #define error(msg, ...)                                             \
@@ -210,9 +56,9 @@ static void print_message(bool fatal, const char *msg, ...)
     print_message(false, "e9afl log: " msg "\n", ## __VA_ARGS__)
 
 /* SHM setup. */
-static void __afl_map_shm(const char **envp)
+static void __afl_map_shm(void)
 {
-    const char *id_str = getenv("__AFL_SHM_ID", envp);
+    const char *id_str = getenv("__AFL_SHM_ID");
 
     /* 
      * If we're running under AFL, attach to the appropriate region,
@@ -225,7 +71,7 @@ static void __afl_map_shm(const char **envp)
     if (id_str != NULL)
     {
         shm_id = (uint32_t)atoi(id_str);
-        afl_area_ptr = shmat(shm_id, AREA_BASE, 0);
+        afl_area_ptr = (intptr_t)shmat(shm_id, AREA_BASE, 0);
     }
     else
     {
@@ -234,7 +80,7 @@ static void __afl_map_shm(const char **envp)
          * and not with afl-fuzz.  Create a dummy area so the program does
          * not crash.
          */
-        afl_area_ptr = mmap(AREA_BASE, AREA_SIZE,
+        afl_area_ptr = (intptr_t)mmap(AREA_BASE, AREA_SIZE,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
     }
@@ -316,9 +162,10 @@ static void __afl_start_forkserver(void)
 /*
  * Init.
  */
-void init(int argc, const char **argv, const char **envp)
+void init(int argc, const char **argv, char **envp)
 {
-    __afl_map_shm(envp);
+    environ = envp;
+    __afl_map_shm();
     __afl_start_forkserver();
 }
 
