@@ -41,9 +41,17 @@ static void print_message(bool fatal, const char *msg, ...)
     va_list ap;
     va_start(ap, msg);
     if (log == NULL)
+    {
         log = fopen("/tmp/e9afl.log", "a");
+        if (log != NULL)
+            setvbuf(log, NULL, _IONBF, 0);
+    }
     if (log == NULL)
+    {
+        if (fatal)
+            abort();
         return;
+    }
     vfprintf(log, msg, ap);
     if (fatal)
         abort();
@@ -164,6 +172,7 @@ static void __afl_start_forkserver(void)
  */
 void init(int argc, const char **argv, char **envp)
 {
+    log("fuzzing binary %s", argv[0]);
     environ = envp;
     __afl_map_shm();
     __afl_start_forkserver();
