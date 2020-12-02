@@ -70,8 +70,7 @@ fi
 BINARY=`which "$1"`
 BASENAME=`basename "$BINARY"`
 echo -e "${GREEN}$0${OFF}: adding AFL instrumentation to $BINARY..."
-echo "./e9tool --match 'plugin(e9afl).match()' --action 'plugin(e9afl).patch()' --option --experimental -o $BASENAME.afl -c $COMPRESS $TRAP_ALL"
+echo "./e9tool --match 'plugin(e9afl).match()' --action 'plugin(e9afl).patch()' -o $BASENAME.afl -c $COMPRESS $TRAP_ALL"
 ./e9tool --match 'plugin(e9afl).match()' --action 'plugin(e9afl).patch()' \
-    --option --experimental -o "$BASENAME.afl" "$BINARY" \
-    $TRAP_ALL -c $COMPRESS
+    -o "$BASENAME.afl" "$BINARY" $TRAP_ALL -c $COMPRESS
 
