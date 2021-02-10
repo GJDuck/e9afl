@@ -21,9 +21,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <cassert>
+
+#include <initializer_list>
+#include <map>
 #include <sstream>
 #include <string>
 #include <set>
+#include <vector>
 
 #include "e9plugin.h"
 
@@ -43,8 +48,8 @@ bool option_no_instrument = false;
 /*
  * Jump/call target information.
  */
+static std::map<intptr_t, uint8_t> instrs;
 static std::set<intptr_t> targets;
-bool alive = false;
 
 /*
  * Initialization.
@@ -67,6 +72,11 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
     // Send the AFL runtime:
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
     sendELFFileMessage(out, rt, /*absolute=*/true);
+
+    // Set the optimization level:
+    std::vector<char *> options = {"-Ojump-elim=32", "-Ojump-peephole=true",
+        "-Oscratch-stack=true"};
+    sendOptionMessage(out, options);
 
     // Send the AFL instrumentation:
     //
@@ -131,6 +141,10 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
 extern void e9_plugin_instr_v1(FILE *out, const e9frontend::ELF *elf,
     csh handle, off_t offset, const cs_insn *I, void *context)
 {
+    static bool alive = false;
+
+    instrs.insert({I->address, I->size});
+
     if (!alive && I->id != X86_INS_NOP)
     {
         // First non-NOP instruction after a unconditional branch/return is
@@ -188,31 +202,49 @@ extern void e9_plugin_instr_v1(FILE *out, const e9frontend::ELF *elf,
 }
 
 /*
+ * Optimize the targets.  Selects the best instruction in a BB to instrument.
+ */
+static void optimizeTargets(void)
+{
+    std::set<intptr_t> new_targets;
+
+    for (auto target: targets)
+    {
+        auto i = instrs.find(target);
+        if (i == instrs.end())
+            continue;
+        uint8_t target_size = i->second;
+        for (++i; i != instrs.end() && target_size < /*sizeof(jmpq)=*/5; ++i)
+        {
+            auto j = targets.find(i->first);
+            if (j != targets.end())
+                break;
+            if (i->second > target_size)
+            {
+                target      = i->first;
+                target_size = i->second;
+                break;
+            }
+        }
+        new_targets.insert(target);
+    }
+    targets.swap(new_targets);
+    instrs.clear();
+}
+
+/*
  * Matching.  Return `true' iff we should instrument this instruction.
  */
 extern intptr_t e9_plugin_match_v1(FILE *out, const e9frontend::ELF *elf,
     csh handle, off_t offset, const cs_insn *I, void *context)
 {
-    bool target = (targets.find(I->address) != targets.end());
-    if (!target)
-        return false;
-
-    if (I->size > 1)
-        return true;
-
-    // This is a single-byte instruction, which means that E9Patch will have
-    // poor coverage.  Attempt to defer the instrumentation to the next
-    // instruction which will hopefully be multi-byte.
-
-    if (I->id == X86_INS_RET) 
-        return true;                // Cannot defer: single-byte CFT.
-    if (targets.find(I->address + I->size) != targets.end())
-        return true;                // Cannot defer: next instr is target.
-
-    targets.erase(I->address);
-    targets.insert(I->address + I->size);
-
-    return false;
+    static bool optimized = false;
+    if (!optimized)
+    {
+        optimizeTargets();
+        optimized = true;
+    }
+    return (targets.find(I->address) != targets.end());
 }
 
 /*

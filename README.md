@@ -60,14 +60,15 @@ E9Patch may fail to instrument some instructions, which may also result in
 missed paths.
 However, for most binaries E9AFL should give reasonable performance.
 
-E9AFL is based on [E9Patch](https://github.com/GJDuck/e9patch) which
-uses a complex virtual address space layout for the instrumented binary.
-This can slow down `fork()`, which limits the performance of
-E9AFL-instrumented binaries (although it still seems faster than QEMU mode).
-You can increase the performance (at the cost of file size) by
-decreasing the compression-level using the `-c` option, e.g.:
-
-        $ ./e9afl -c 1 readelf
+E9AFL is built on top of [E9Patch](https://github.com/GJDuck/e9patch),
+which is a trampoline-based binary rewriting tool.
+This approach may generate additional overheads in the
+form of soft page faults when trampolines are first accessed immediately
+after `fork()`.
+This adds latency compared to source-level fuzzing, which may
+slow down the overall execs/sec performance.
+Nevertheless, the performance of E9AFL appears to be somewhat better than
+other binary fuzzing solutions such as QEMU mode.
  
 ## License
 
