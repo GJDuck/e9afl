@@ -73,11 +73,6 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
     sendELFFileMessage(out, rt, /*absolute=*/true);
 
-    // Set the optimization level:
-    std::vector<char *> options = {"-Ojump-elim=32", "-Ojump-peephole=true",
-        "-Oscratch-stack=true"};
-    sendOptionMessage(out, options);
-
     // Send the AFL instrumentation:
     //
     // Save state:
