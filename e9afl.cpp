@@ -34,28 +34,32 @@
 
 using namespace e9frontend;
 
+#include "e9cfg.cpp"
+
 #define AREA_BASE   0x200000
 #define AREA_SIZE   ((size_t)1 << 16)
 
+bool option_debug         = false;
 bool option_no_instrument = false;
 
 /*
  * To compile:
  *      $ g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp \
- *          -I . -I capstone/include/
+ *          -I .
  */
 
 /*
- * Jump/call target information.
+ * All jump targets.
  */
-static std::map<intptr_t, uint8_t> instrs;
 static std::set<intptr_t> targets;
 
 /*
  * Initialization.
  */
-extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
+extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
 {
+    srand(0xe9e9e9e9);
+
     const int32_t stack_adjust = 0x4000;
     const int32_t afl_rt_ptr   = 0x1d0000;
     const int32_t afl_area_ptr = AREA_BASE;
@@ -63,6 +67,8 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
     // Reserve memory used by the afl_area_ptr:
     sendReserveMessage(out, afl_area_ptr, AREA_SIZE, /*absolute=*/true);
 
+    if (getenv("E9AFL_DEBUG") != nullptr)
+        option_debug = true;
     if (getenv("E9AFL_NO_INSTRUMENT") != nullptr)
     {
         option_no_instrument = true;
@@ -131,124 +137,110 @@ extern void *e9_plugin_init_v1(FILE *out, const e9frontend::ELF *elf)
 }
 
 /*
- * Instruction.  Look for targets.
- */
-extern void e9_plugin_instr_v1(FILE *out, const e9frontend::ELF *elf,
-    csh handle, off_t offset, const cs_insn *I, void *context)
-{
-    static bool alive = false;
-
-    instrs.insert({I->address, I->size});
-
-    if (!alive && I->id != X86_INS_NOP)
-    {
-        // First non-NOP instruction after a unconditional branch/return is
-        // considered to be a target:
-        targets.insert(I->address);
-        alive = true;
-    }
-
-    /*
-     * We aim to instrument:
-     *
-     * ^main:      - function entry point (always instrumented)
-     * ^.L0:       - branch label
-     * ^.LBB0_0:   - branch label
-     * ^\tjnz foo  - conditional branches
-     */
-    const cs_detail *detail = I->detail;
-    switch (I->id)
-    {
-        case X86_INS_RET:
-            alive = false;
-            return;
-        case X86_INS_JMP:
-            alive = false;
-            break;
-        case X86_INS_CALL:
-            break;
-        case X86_INS_JO: case X86_INS_JNO: case X86_INS_JB: case X86_INS_JAE:
-        case X86_INS_JE: case X86_INS_JNE: case X86_INS_JBE: case X86_INS_JA:
-        case X86_INS_JS: case X86_INS_JNS: case X86_INS_JP: case X86_INS_JNP:
-        case X86_INS_JL: case X86_INS_JGE: case X86_INS_JLE: case X86_INS_JG:
-        {
-            // For conditional jumps, the next instruction is also considered
-            // a target (for the fall-through case):
-            int64_t target = (I->address + I->size);
-            targets.insert(target);
-            break;
-        }
-        default:
-            // Not a control-flow-transfer:
-            return;
-    }
-    const cs_x86_op *op = &detail->x86.operands[0];
-    int64_t target = -1;
-    switch (op->type)
-    {
-        case X86_OP_IMM:
-            target = op->imm;
-            break;
-        default:
-            // Indirect
-            return;
-    }
-    targets.insert(target);
-}
-
-/*
  * Optimize the targets.  Selects the best instruction in a BB to instrument.
  */
-static void optimizeTargets(void)
+static void optimizeTargets(const ELF *elf, const Instr *Is, size_t size,
+    std::set<intptr_t> &targets)
 {
     std::set<intptr_t> new_targets;
 
     for (auto target: targets)
     {
-        auto i = instrs.find(target);
-        if (i == instrs.end())
+        size_t i = findInstr(Is, size, target);
+        if (i >= size)
             continue;
-        uint8_t target_size = i->second;
-        for (++i; i != instrs.end() && target_size < /*sizeof(jmpq)=*/5; ++i)
+        const Instr *I = Is + i;
+
+        uint8_t target_size = I->size;
+        for (++i; i < size && target_size < /*sizeof(jmpq)=*/5; i++)
         {
-            auto j = targets.find(i->first);
-            if (j != targets.end())
-                break;
-            if (i->second > target_size)
+            InstrInfo info0, *info = &info0;
+            getInstrInfo(elf, I, info);
+            bool end = false;
+            switch (info->mnemonic)
             {
-                target      = i->first;
-                target_size = i->second;
-                break;
+                case MNEMONIC_RET:
+                case MNEMONIC_CALL:
+                case MNEMONIC_JMP:
+                case MNEMONIC_JO: case MNEMONIC_JNO: case MNEMONIC_JB:
+                case MNEMONIC_JAE: case MNEMONIC_JE: case MNEMONIC_JNE:
+                case MNEMONIC_JBE: case MNEMONIC_JA: case MNEMONIC_JS:
+                case MNEMONIC_JNS: case MNEMONIC_JP: case MNEMONIC_JNP:
+                case MNEMONIC_JL: case MNEMONIC_JGE: case MNEMONIC_JLE:
+                case MNEMONIC_JG:
+                    end = true;
+                    break;
+                default:
+                    break;
             }
+            if (end)
+                break;
+            const Instr *J = I+1;
+            if (I->address + I->size != J->address)
+                break;
+            if (targets.find(J->address) != targets.end())
+                break;
+            if (J->size > target_size)
+            {
+                target      = J->address;
+                target_size = J->size;
+            }
+            I = J;
         }
         new_targets.insert(target);
     }
+    unsigned bb = 0;
+    for (size_t i = 0; option_debug && i < size; i++)
+    {
+        InstrInfo I0, *I = &I0;
+        getInstrInfo(elf, Is + i, I);
+        if (targets.find(I->address) != targets.end())
+            fprintf(stderr, "\nBB_%u:\n", bb++);
+        if (new_targets.find(I->address) != new_targets.end())
+            fprintf(stderr, "%lx: \33[33m%s\33[0m\n", I->address,
+                I->string.instr);
+        else
+            fprintf(stderr, "%lx: %s\n", I->address, I->string.instr);
+    }
+
     targets.swap(new_targets);
-    instrs.clear();
+}
+
+/*
+ * Events.
+ */
+extern void e9_plugin_event_v1(FILE *out, const ELF *elf,
+    const Instr *Is, size_t size, Event event, void *context)
+{
+    switch (event)
+    {
+        case EVENT_DISASSEMBLY_COMPLETE:
+            CFGAnalysis(elf, Is, size, targets);
+            optimizeTargets(elf, Is, size, targets);
+            break;
+        default:
+            break;
+    }
 }
 
 /*
  * Matching.  Return `true' iff we should instrument this instruction.
  */
-extern intptr_t e9_plugin_match_v1(FILE *out, const e9frontend::ELF *elf,
-    csh handle, off_t offset, const cs_insn *I, void *context)
+extern intptr_t e9_plugin_match_v1(FILE *out, const ELF *elf,
+    const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
+    void *context)
 {
-    static bool optimized = false;
-    if (!optimized)
-    {
-        optimizeTargets();
-        optimized = true;
-    }
-    return (targets.find(I->address) != targets.end());
+    return (targets.find(info->address) != targets.end());
 }
 
 /*
  * Patching.
  */
-extern void e9_plugin_patch_v1(FILE *out, const e9frontend::ELF *elf,
-    csh handle, off_t offset, const cs_insn *I, void *context)
+extern void e9_plugin_patch_v1(FILE *out, const ELF *elf,
+    const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
+    void *context)
 {
-    if (targets.find(I->address) == targets.end())
+    if (targets.find(info->address) == targets.end())
         return;
     if (option_no_instrument)
         return;
@@ -273,6 +265,6 @@ extern void e9_plugin_patch_v1(FILE *out, const e9frontend::ELF *elf,
     metadata[2].name = nullptr;
     metadata[2].data = nullptr;
 
-    sendPatchMessage(out, "afl", offset, metadata);
+    sendPatchMessage(out, "afl", info->offset, metadata);
 }
 

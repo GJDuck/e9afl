@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) 2020 National University of Singapore
+# Copyright (C) 2021 National University of Singapore
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,47 +30,19 @@ else
     OFF=
 fi
 
-usage()
-{
-    echo -e "${RED}usage${OFF}: $0 [OPTIONS] /path/to/binary" >&2
-    echo >&2
-    echo "OPTIONS:" >&2
-    echo "    -c N" >&2
-    echo "        Use compression level N" >&2
-    echo "    -t" >&2
-    echo "        Generate SIGTRAP for each trampoline entry (for debugging)" >&2
-    echo >&2
-    exit 1
-}
-
-TRAP_ALL=
-COMPRESS=7
-while getopts "c:t" OPTION
-do
-    case "$OPTION"
-    in
-        t)
-            TRAP_ALL=--trap-all
-            ;;
-        c)
-            COMPRESS=$OPTARG
-            ;;
-        *)
-            usage
-            ;;
-    esac
-done
-
-shift $((OPTIND-1))
-if [ $# != 1 ]
+if [ "$#" -lt 1 ]
 then
-    usage
+    echo "usage: $0 program [e9tool-options]" >&2
+    exit 1
 fi
 
+COMPRESS=7
 BINARY=`which "$1"`
+shift 1
 BASENAME=`basename "$BINARY"`
+OUTPUT=$BASENAME.afl
 echo -e "${GREEN}$0${OFF}: adding AFL instrumentation to $BINARY..."
-echo "./e9tool -O2 --match 'plugin(e9afl).match()' --action 'plugin(e9afl).patch()' -o $BASENAME.afl -c $COMPRESS $TRAP_ALL"
-./e9tool -O2 --match 'plugin(e9afl).match()' --action 'plugin(e9afl).patch()' \
-    -o "$BASENAME.afl" "$BINARY" -c $COMPRESS $TRAP_ALL
+echo "./e9tool -O2 -M 'plugin(e9afl).match()' -A 'plugin(e9afl).patch()' -o $OUTPUT -c $COMPRESS $@"
+./e9tool -O2 --exclude '".plt"' --exclude '".plt.got"' -M 'plugin(e9afl).match()' \
+    -A 'plugin(e9afl).patch()' -o "$OUTPUT" "$BINARY" -c $COMPRESS $@
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) 2020 National University of Singapore
+# Copyright (C) 2021 National University of Singapore
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=4c611be67da585b17bcc1c6585c836bcc5bef3ee
+VERSION=e21482d7ee30f4bd08ec9ade26320c126404e69c
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -53,7 +53,6 @@ then
     ln -f -s e9patch-$VERSION/e9patch
     ln -f -s e9patch-$VERSION/e9tool
     ln -f -s e9patch-$VERSION/e9compile.sh
-    ln -f -s e9patch-$VERSION/capstone
     ln -f -s e9patch-$VERSION/examples/stdlib.c
     echo -e "${GREEN}$0${OFF}: e9patch has been built..."
 else
@@ -62,9 +61,9 @@ fi
 
 # STEP (2): build the E9Tool plugin:
 echo -e "${GREEN}$0${OFF}: building the e9afl plugin..."
-echo "g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp -I . -I capstone/include/"
+echo "g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp -I ."
 g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp \
-    -I e9patch-$VERSION/src/e9tool/ -I capstone/include/
+    -I e9patch-$VERSION/src/e9tool/
 
 # STEP (3): build the runtime:
 echo -e "${GREEN}$0${OFF}: building the e9afl runtime..."
@@ -98,6 +97,6 @@ echo "    ./e9afl readelf"
 echo "    mkdir -p input"
 echo "    mkdir -p output"
 echo "    head -n 1 \`which ls\` > input/exe"
-echo "    afl-fuzz -m 500000000 -i input/ -o output/ -- ./readelf.afl -a @@"
+echo "    afl-fuzz -i input/ -o output/ -- ./readelf.afl -a @@"
 echo
 
