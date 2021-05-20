@@ -79,6 +79,7 @@ static void __afl_map_shm(void)
     if (id_str != NULL)
     {
         shm_id = (uint32_t)atoi(id_str);
+        (void)munmap(AREA_BASE, AREA_SIZE);
         afl_area_ptr = (intptr_t)shmat(shm_id, AREA_BASE, 0);
     }
     else
@@ -171,6 +172,19 @@ static void __afl_start_forkserver(void)
  */
 void init(int argc, const char **argv, char **envp)
 {
+    if (envp == NULL)
+    {
+        /*
+         * This is a shared library.  For this, we set up a dummy area so the
+         * instrumentation does not crash during program initialization.  The
+         * main executable is repsonsible for setting up AFL proper.
+         */
+        (void)mmap(AREA_BASE, AREA_SIZE,
+                PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        return;
+    }
+
     log("fuzzing binary %s", argv[0]);
     environ = envp;
     __afl_map_shm();
@@ -181,7 +195,7 @@ void init(int argc, const char **argv, char **envp)
  * Entry.  This is a (slower) alternative to the plugin instrumentation.
  *
  * USAGE:
- *      E9AFL_NO_INSTRUMENT=1 ./e9tool -M 'plugin[e9afl]' \
+ *      E9AFL_NO_INSTRUMENT=1 ./e9tool -M 'plugin(e9afl).match()' \
  *               -A 'call entry(random)@"afl-rt"' \
  *               path/to/binary
  */

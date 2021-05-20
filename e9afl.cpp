@@ -58,10 +58,15 @@ static std::set<intptr_t> targets;
  */
 extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
 {
-    srand(0xe9e9e9e9);
+    // Make seed depend on filename.
+    unsigned seed = 0;
+    const char *filename = getELFFilename(elf);
+    for (int i = 0; filename[i] != '\0'; i++)
+        seed = 101 * seed + (unsigned)filename[i];
+    srand(seed);
 
     const int32_t stack_adjust = 0x4000;
-    const int32_t afl_rt_ptr   = 0x1d0000;
+    const int32_t afl_rt_ptr   = 0x50000000;
     const int32_t afl_area_ptr = AREA_BASE;
 
     // Reserve memory used by the afl_area_ptr:
@@ -75,9 +80,9 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
         return nullptr;
     }
 
-    // Send the AFL runtime:
+    // Send the AFL runtime (if not shared object):
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
-    sendELFFileMessage(out, rt, /*absolute=*/true);
+    sendELFFileMessage(out, rt);
 
     // Send the AFL instrumentation:
     //

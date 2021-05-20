@@ -38,11 +38,16 @@ fi
 
 COMPRESS=7
 BINARY=`which "$1"`
+if [ "$BINARY" = "" ]
+then
+    BINARY=$1
+fi
 shift 1
 BASENAME=`basename "$BINARY"`
 OUTPUT=$BASENAME.afl
 echo -e "${GREEN}$0${OFF}: adding AFL instrumentation to $BINARY..."
-echo "./e9tool -O2 -M 'plugin(e9afl).match()' -A 'plugin(e9afl).patch()' -o $OUTPUT -c $COMPRESS $@"
+echo "./e9tool -O2 --exclude '".plt"' --exclude '".plt.got"' \
+    -M 'plugin(e9afl).match()' -A 'plugin(e9afl).patch()' -o $OUTPUT -c $COMPRESS $@"
 ./e9tool -O2 --exclude '".plt"' --exclude '".plt.got"' -M 'plugin(e9afl).match()' \
-    -A 'plugin(e9afl).patch()' -o "$OUTPUT" "$BINARY" -c $COMPRESS $@
+    -A 'plugin(e9afl).patch()' -o "$OUTPUT" "$BINARY" -c $COMPRESS "$@"
 
