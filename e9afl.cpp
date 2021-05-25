@@ -41,6 +41,7 @@ using namespace e9frontend;
 
 bool option_debug         = false;
 bool option_no_instrument = false;
+bool option_no_optimize   = false;
 
 /*
  * To compile:
@@ -79,6 +80,8 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
         option_no_instrument = true;
         return nullptr;
     }
+    if (getenv("E9AFL_NO_OPTIMIZE") != nullptr)
+        option_no_optimize = true;
 
     // Send the AFL runtime (if not shared object):
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
@@ -147,8 +150,10 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
 static void optimizeTargets(const ELF *elf, const Instr *Is, size_t size,
     std::set<intptr_t> &targets)
 {
-    std::set<intptr_t> new_targets;
+    if (option_no_optimize)
+        return;
 
+    std::set<intptr_t> new_targets;
     for (auto target: targets)
     {
         size_t i = findInstr(Is, size, target);
