@@ -39,9 +39,45 @@ using namespace e9frontend;
 #define AREA_BASE   0x200000
 #define AREA_SIZE   ((size_t)1 << 16)
 
-bool option_debug         = false;
-bool option_no_instrument = false;
-bool option_no_optimize   = false;
+/*
+ * Options.
+ */
+enum Option
+{
+    OPTION_NEVER,
+    OPTION_DEFAULT,
+    OPTION_ALWAYS
+};
+static Option option_debug      = OPTION_DEFAULT;
+static Option option_instrument = OPTION_DEFAULT;
+static Option option_Oselect    = OPTION_DEFAULT;
+static Option option_Oblock     = OPTION_DEFAULT;
+
+static Option parseOption(const char *str)
+{
+    if (strcmp(str, "never") == 0)
+        return OPTION_NEVER;
+    if (strcmp(str, "default") == 0)
+        return OPTION_DEFAULT;
+    if (strcmp(str, "always") == 0)
+        return OPTION_ALWAYS;
+    error("bad option value \"%s\"; expected one of {\"never\", \"default\", "
+        "\"always\"}", str);
+}
+
+/*
+ * CFG
+ */
+struct BB
+{
+    std::vector<intptr_t> preds;    // Predecessor BBs
+    std::vector<intptr_t> succs;    // Successor BBs
+    intptr_t instrument = -1;       // Instrumentation point
+    bool optimized      = false;    // Optimize block?
+    bool bad            = false;    // Bad block?
+};
+typedef std::map<intptr_t, BB> CFG;
+#define BB_INDIRECT     (-1)
 
 /*
  * To compile:
@@ -50,9 +86,9 @@ bool option_no_optimize   = false;
  */
 
 /*
- * All jump targets.
+ * All instrumentation points.
  */
-static std::set<intptr_t> targets;
+static std::set<intptr_t> instrument;
 
 /*
  * Initialization.
@@ -73,15 +109,21 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
     // Reserve memory used by the afl_area_ptr:
     sendReserveMessage(out, afl_area_ptr, AREA_SIZE, /*absolute=*/true);
 
-    if (getenv("E9AFL_DEBUG") != nullptr)
-        option_debug = true;
-    if (getenv("E9AFL_NO_INSTRUMENT") != nullptr)
-    {
-        option_no_instrument = true;
+    const char *str = nullptr;
+    if ((str = getenv("E9AFL_DEBUG")) != nullptr)
+        option_debug = parseOption(str);
+    if ((str = getenv("E9AFL_INSTRUMENT")) != nullptr)
+        option_instrument = parseOption(str);
+    if ((str = getenv("E9AFL_OBLOCK")) != nullptr)
+        option_Oblock = parseOption(str);
+    if ((str = getenv("E9AFL_OSELECT")) != nullptr)
+        option_Oselect = parseOption(str);
+   
+    if (option_instrument == OPTION_NEVER)
         return nullptr;
-    }
-    if (getenv("E9AFL_NO_OPTIMIZE") != nullptr)
-        option_no_optimize = true;
+    if (option_Oblock == OPTION_ALWAYS)
+        warning("always removing AFL instrumentation for bad blocks; coverage "
+            "may be incomplete");
 
     // Send the AFL runtime (if not shared object):
     const ELF *rt = parseELF("afl-rt", afl_rt_ptr);
@@ -145,24 +187,229 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
 }
 
 /*
- * Optimize the targets.  Selects the best instruction in a BB to instrument.
+ * Add a predecessor block.
  */
-static void optimizeTargets(const ELF *elf, const Instr *Is, size_t size,
-    std::set<intptr_t> &targets)
+static void addPredecessor(intptr_t pred, intptr_t succ,
+    const Targets &targets, CFG &cfg)
 {
-    if (option_no_optimize)
+    auto i = targets.lower_bound(succ);
+    if (i == targets.end())
+        return;
+    succ = i->first;
+    auto j = cfg.find(succ);
+    if (j == cfg.end())
+    {
+        BB empty;
+        auto r = cfg.insert({succ, empty});
+        j = r.first;
+    }
+    j->second.preds.push_back(pred);
+}
+
+/*
+ * Add a successor block.
+ */
+static void addSuccessor(intptr_t pred, intptr_t succ,
+    const Targets &targets, CFG &cfg)
+{
+    auto i = targets.find(pred);
+    if (i == targets.end())
+        return;
+    auto j = cfg.find(pred);
+    if (j == cfg.end())
+    {
+        BB empty;
+        auto r = cfg.insert({pred, empty});
+        j = r.first;
+    }
+    j->second.succs.push_back(succ);
+}
+
+/*
+ * Build the CFG from the set of jump targets.
+ */
+static void buildCFG(const ELF *elf, const Instr *Is, size_t size,
+    const Targets &targets, CFG &cfg)
+{
+    for (const auto &entry: targets)
+    {
+        intptr_t target = entry.first, bb = target;
+        TargetKind kind = entry.second;
+
+        size_t i = findInstr(Is, size, target);
+        if (i >= size)
+            continue;
+
+        if (kind != TARGET_DIRECT)
+            addPredecessor(BB_INDIRECT, bb, targets, cfg);
+
+        const Instr *I = Is + i;
+
+        for (++i; i < size; i++)
+        {
+            InstrInfo info0, *info = &info0;
+            getInstrInfo(elf, I, info);
+            bool end = false;
+            intptr_t target = -1, next = -1;
+            switch (info->mnemonic)
+            {
+                case MNEMONIC_RET:
+                    end = true;
+                    break;
+                case MNEMONIC_JMP:
+                    end = true;
+                    // Fallthrough:
+                case MNEMONIC_CALL:
+                    if (info->op[0].type == OPTYPE_IMM)
+                        target = (intptr_t)info->address +
+                            (intptr_t)info->size + (intptr_t)info->op[0].imm;
+                    break;
+                case MNEMONIC_JO: case MNEMONIC_JNO: case MNEMONIC_JB:
+                case MNEMONIC_JAE: case MNEMONIC_JE: case MNEMONIC_JNE:
+                case MNEMONIC_JBE: case MNEMONIC_JA: case MNEMONIC_JS:
+                case MNEMONIC_JNS: case MNEMONIC_JP: case MNEMONIC_JNP:
+                case MNEMONIC_JL: case MNEMONIC_JGE: case MNEMONIC_JLE:
+                case MNEMONIC_JG:
+                    end = true;
+                    next = (intptr_t)info->address + (intptr_t)info->size;
+                    target = next + (intptr_t)info->op[0].imm;
+                    break;
+                default:
+                    break;
+            }
+            if (target > 0x0)
+                addPredecessor(bb, target, targets, cfg);
+            if (next > 0x0)
+                addPredecessor(bb, next, targets, cfg);
+            if (end)
+            {
+                if (target > 0)
+                    addSuccessor(bb, target, targets, cfg);
+                if (next > 0)
+                    addSuccessor(bb, next, targets, cfg);
+                if (!(target > 0 || next > 0))
+                    addSuccessor(bb, BB_INDIRECT, targets, cfg);
+                break;
+            }
+            const Instr *J = I+1;
+            if (I->address + I->size != J->address)
+                break;
+            if (targets.find(J->address) != targets.end())
+            {
+                // Fallthrough:
+                addPredecessor(bb, J->address, targets, cfg);
+                addSuccessor(bb, J->address, targets, cfg);
+                break;
+            }
+            I = J;
+        }
+    }
+}
+
+/*
+ * Attempt to optimize away a bad block.
+ */
+typedef std::map<BB *, BB *> Paths;
+static void optimizePaths(CFG &cfg, BB *pred_bb, BB *succ_bb, Paths &paths)
+{
+    auto i = paths.find(succ_bb);
+    if (i != paths.end())
+    {
+        // Multiple paths to succ_bb;
+        if (pred_bb != nullptr)
+            pred_bb->optimized = false;
+        else if (i->second != nullptr)
+            i->second->optimized = false;
+        return;
+    }
+    paths.insert({succ_bb, pred_bb});
+    if (succ_bb == nullptr || !succ_bb->optimized)
         return;
 
-    std::set<intptr_t> new_targets;
-    for (auto target: targets)
+    pred_bb = succ_bb;
+    for (auto succ: succ_bb->succs)
     {
+        auto i = cfg.find(succ);
+        succ_bb = (i == cfg.end()? nullptr: &i->second);
+        optimizePaths(cfg, pred_bb, succ_bb, paths);
+    }
+}
+static void optimizeBlock(CFG &cfg, intptr_t entry, BB &bb)
+{
+    if (bb.optimized)
+        return;
+    Paths paths;
+    for (auto succ: bb.succs)
+    {
+        auto i = cfg.find(succ);
+        BB *succ_bb = (i == cfg.end()? nullptr: &i->second);
+        optimizePaths(cfg, nullptr, succ_bb, paths);
+    }
+}
+
+/*
+ * Verify the optimization is correct (for debugging).
+ */
+static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs, BB *bb,
+    std::set<BB *> &seen)
+{
+    for (auto succ: bb->succs)
+    {
+        auto i = cfg.find(succ);
+        BB *succ_bb = (i == cfg.end()? nullptr: &i->second);
+        if (succ_bb == nullptr)
+            fprintf(stderr, " indirect");
+        else
+        {
+            auto j = bbs.find(succ);
+            fprintf(stderr, " BB_%u", j->second);
+        }
+        auto r = seen.insert(succ_bb);
+        if (!r.second)
+        {
+            putc('\n', stderr);
+            error("multiple non-instrumented paths detected");
+        }
+        if (succ_bb != nullptr && succ_bb->instrument < 0)
+            verify(cfg, bbs, succ_bb, seen);
+    }
+}
+static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs)
+{
+    for (auto &entry: cfg)
+    {
+        auto i = bbs.find(entry.first);
+        fprintf(stderr, "\33[32mVERIFY\33[0m BB_%u:", i->second);
+        std::set<BB *> seen;
+        verify(cfg, bbs, &entry.second, seen);
+        putc('\n', stderr);
+    }
+}
+
+/*
+ * Calculate all instrumentation points.
+ */
+static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
+    Targets &targets, std::set<intptr_t> &instrument)
+{
+    // Step #1: build the CFG:
+    CFG cfg;
+    buildCFG(elf, Is, size, targets, cfg);
+
+    // Step #2: find all instrumentation-points/bad-blocks
+    for (const auto &entry: targets)
+    {
+        intptr_t target = entry.first, bb = target;
+        TargetKind kind = entry.second;
+
         size_t i = findInstr(Is, size, target);
         if (i >= size)
             continue;
         const Instr *I = Is + i;
 
         uint8_t target_size = I->size;
-        for (++i; i < size && target_size < /*sizeof(jmpq)=*/5; i++)
+        for (++i; option_Oselect != OPTION_NEVER && i < size &&
+                target_size < /*sizeof(jmpq)=*/5; i++)
         {
             InstrInfo info0, *info = &info0;
             getInstrInfo(elf, I, info);
@@ -197,23 +444,86 @@ static void optimizeTargets(const ELF *elf, const Instr *Is, size_t size,
             }
             I = J;
         }
-        new_targets.insert(target);
+        auto j = cfg.find(bb);
+        assert(j != cfg.end());
+        j->second.instrument = target;
+        j->second.bad        = (target_size < /*sizeof(jmpq)=*/5);
+        j->second.optimized  =
+            (option_Oblock != OPTION_NEVER && j->second.bad &&
+                kind == TARGET_DIRECT);
     }
-    unsigned bb = 0;
-    for (size_t i = 0; option_debug && i < size; i++)
+
+    // Step #3: Optimize away bad blocks:
+    if (option_Oblock == OPTION_DEFAULT)
+        for (auto &entry: cfg)
+            optimizeBlock(cfg, entry.first, entry.second);
+
+    // Step #4: Collect final instrumentation points.
+    for (auto &entry: cfg)
+    {
+        if (!entry.second.optimized)
+            instrument.insert(entry.second.instrument);
+    }
+
+    // Setp #5: Print debugging information (if necessary)
+    std::map<intptr_t, unsigned> bbs;
+    if (option_debug == OPTION_ALWAYS)
+    {
+        unsigned bb = 0;
+        for (const auto &entry: targets)
+            bbs.insert({entry.first, bb++});
+    }
+    for (size_t i = 0; (option_debug == OPTION_ALWAYS) && i < size; i++)
     {
         InstrInfo I0, *I = &I0;
         getInstrInfo(elf, Is + i, I);
-        if (targets.find(I->address) != targets.end())
-            fprintf(stderr, "\nBB_%u:\n", bb++);
-        if (new_targets.find(I->address) != new_targets.end())
+
+        auto j = cfg.find(I->address);
+        if (j != cfg.end())
+        {
+            auto l = bbs.find(I->address);
+            fprintf(stderr, "\n# \33[32mBB_%u\33[0m%s%s\n", l->second,
+                (j->second.bad? " [\33[31mBAD\33[0m]": ""),
+                (j->second.bad && !j->second.optimized?
+                    " [\33[31mUNOPTIMIZED\33[0m]": ""));
+            fprintf(stderr, "# preds = ");
+            int count = 0;
+            for (auto pred: j->second.preds)
+            {
+                if (count++ != 0)
+                    putc(',', stderr);
+                if (pred == BB_INDIRECT)
+                {
+                    fprintf(stderr, "indirect");
+                    continue;
+                }
+                auto l = bbs.find(pred);
+                fprintf(stderr, "BB_%u", l->second);
+            }
+            fprintf(stderr, "\n# succs = ");
+            count = 0;
+            for (auto pred: j->second.succs)
+            {
+                if (count++ != 0)
+                    putc(',', stderr);
+                if (pred == BB_INDIRECT)
+                {
+                    fprintf(stderr, "indirect");
+                    continue;
+                }
+                auto l = bbs.find(pred);
+                fprintf(stderr, "BB_%u", l->second);
+            }
+            putc('\n', stderr);
+        }
+        if (instrument.find(I->address) != instrument.end())
             fprintf(stderr, "%lx: \33[33m%s\33[0m\n", I->address,
                 I->string.instr);
         else
             fprintf(stderr, "%lx: %s\n", I->address, I->string.instr);
     }
-
-    targets.swap(new_targets);
+    if (option_debug == OPTION_ALWAYS)
+        verify(cfg, bbs);
 }
 
 /*
@@ -225,9 +535,12 @@ extern void e9_plugin_event_v1(FILE *out, const ELF *elf,
     switch (event)
     {
         case EVENT_DISASSEMBLY_COMPLETE:
+        {
+            Targets targets;
             CFGAnalysis(elf, Is, size, targets);
-            optimizeTargets(elf, Is, size, targets);
+            calcInstrumentPoints(elf, Is, size, targets, instrument);
             break;
+        }
         default:
             break;
     }
@@ -240,7 +553,7 @@ extern intptr_t e9_plugin_match_v1(FILE *out, const ELF *elf,
     const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
     void *context)
 {
-    return (targets.find(info->address) != targets.end());
+    return (instrument.find(info->address) != instrument.end());
 }
 
 /*
@@ -250,9 +563,9 @@ extern void e9_plugin_patch_v1(FILE *out, const ELF *elf,
     const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
     void *context)
 {
-    if (targets.find(info->address) == targets.end())
+    if (option_instrument == OPTION_NEVER)
         return;
-    if (option_no_instrument)
+    if (instrument.find(info->address) == instrument.end())
         return;
 
     Metadata metadata[3];

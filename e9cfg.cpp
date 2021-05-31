@@ -42,6 +42,37 @@ static bool option_cfg_debug = false;
     while (false)
 
 typedef std::map<intptr_t, const Elf64_Rela *> RelaInfo;
+enum TargetKind : uint8_t
+{
+    TARGET_ENTRY,
+    TARGET_DIRECT,
+    TARGET_INDIRECT
+};
+typedef std::map<intptr_t, TargetKind> Targets;
+
+/*
+ * Insert target information.
+ */
+static void addTarget(intptr_t target, TargetKind kind, Targets &targets)
+{
+    auto r = targets.insert({target, kind});
+    if (!r.second)
+    {
+        // Existing entry found:
+        switch (r.first->second)
+        {
+            case TARGET_ENTRY:
+                r.first->second = kind;
+                break;
+            case TARGET_DIRECT:
+                if (kind == TARGET_INDIRECT)
+                    r.first->second = kind;
+                break;
+            default:
+                break;
+        }
+    }  
+}
 
 /*
  * Get the bounds of a buffer assuming T-aligment.
@@ -85,7 +116,7 @@ static size_t findInstr(const Instr *Is, size_t size, intptr_t address)
  * Code analysis pass: find all probable code targets.
  */
 static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
-    size_t size, std::set<intptr_t> &tables, std::set<intptr_t> &targets)
+    size_t size, std::set<intptr_t> &tables, Targets &targets)
 {
     // STEP (1): Calculate a rough-cut of the targets:
     intptr_t next = INTPTR_MIN;
@@ -99,7 +130,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
             // executable code.  Thus, something probably jumps here, so is
             // considered a jump target.
             DEBUG(targets, I->address, "Entry : %p", (void *)I->address);
-            targets.insert(I->address);
+            addTarget(I->address, TARGET_ENTRY, targets);
         }
         next = I->address + I->size;
 
@@ -118,7 +149,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
                 if (findInstr(Is, size, target) < size)
                 {
                     DEBUG(targets, target, "Load  : %p", (void *)target);
-                    targets.insert(target);
+                    addTarget(target, TARGET_INDIRECT, targets);
                 }
                 continue;
 
@@ -133,7 +164,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
                 if (findInstr(Is, size, target) < size)
                 {
                     DEBUG(targets, target, "Load  : %p", (void *)target);
-                    targets.insert(target);
+                    addTarget(target, TARGET_INDIRECT, targets);
                 }
                 else if (pic)
                 {
@@ -146,11 +177,11 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
 
             case MNEMONIC_RET:
                 DEBUG(targets, next, "Next  : %p", (void *)next);
-                targets.insert(next);
+                addTarget(next, TARGET_ENTRY, targets);
                 continue;
             case MNEMONIC_JMP:
                 DEBUG(targets, next, "Next  : %p", (void *)next);
-                targets.insert(next);
+                addTarget(next, TARGET_ENTRY, targets);
                 break;
             case MNEMONIC_CALL:
                 break;
@@ -162,7 +193,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
             case MNEMONIC_JG:
                 // The branch-not-taken is considered a jump target:
                 DEBUG(targets, next, "NotTkn: %p", (void *)next);
-                targets.insert(next);
+                addTarget(next, TARGET_DIRECT, targets);
                 break;
             default:
                 continue;
@@ -176,8 +207,8 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
         }
         target = (intptr_t)I->address + (intptr_t)I->size +
             (intptr_t)I->op[0].imm;
-        DEBUG(targets, next, "Target: %p", (void *)target);
-        targets.insert(target);
+        DEBUG(targets, target, "Target: %p", (void *)target);
+        addTarget(target, TARGET_DIRECT, targets);
     }
 
     // Symbols are assumed to be jump targets:
@@ -193,7 +224,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
                 continue;
             intptr_t target = sym->st_value;
             DEBUG(targets, target, "Symbol: %p", (void *)target);
-            targets.insert(target);
+            addTarget(target, TARGET_INDIRECT, targets);
         }
     }
 }
@@ -203,7 +234,7 @@ static void CFGCodeAnalysis(const ELF *elf, bool pic, const Instr *Is,
  */
 static void CFGSectionAnalysis(const ELF *elf, bool pic, const char *name,
     const Elf64_Shdr *shdr, const Instr *Is, size_t size, const RelaInfo relas,
-    const std::set<intptr_t> &tables, std::set<intptr_t> &targets)
+    const std::set<intptr_t> &tables, Targets &targets)
 {
     if ((shdr->sh_flags & SHF_EXECINSTR) != 0 || shdr->sh_addr == 0x0)
         return;
@@ -225,7 +256,7 @@ static void CFGSectionAnalysis(const ELF *elf, bool pic, const char *name,
             {
                 // "Probably" a jump target.
                 DEBUG(targets, target, "Data  : %p", (void *)target);
-                targets.insert(target);
+                addTarget(target, TARGET_INDIRECT, targets);
             }
         }
         return;
@@ -256,7 +287,8 @@ static void CFGSectionAnalysis(const ELF *elf, bool pic, const char *name,
                         break;
                     DEBUG(targets, target, "JmpTbl: %p%+zd = %p",
                         (void *)table, offset, (void *)target);
-                    targets.insert(target);
+                    // Jump tables are treated as direct:
+                    addTarget(target, TARGET_DIRECT, targets);
                 }
             }
         }
@@ -278,7 +310,7 @@ static void CFGSectionAnalysis(const ELF *elf, bool pic, const char *name,
                 if (findInstr(Is, size, target) >= size)
                     continue;
                 DEBUG(targets, target, "Reloc : %p", (void *)target);
-                targets.insert(target);
+                addTarget(target, TARGET_INDIRECT, targets);
             }
         }
     }
@@ -288,7 +320,7 @@ static void CFGSectionAnalysis(const ELF *elf, bool pic, const char *name,
  * Data analysis pass: find potential code pointers in data.
  */
 static void CFGDataAnalysis(const ELF *elf, bool pic, const Instr *Is,
-    size_t size, const std::set<intptr_t> &tables, std::set<intptr_t> &targets)
+    size_t size, const std::set<intptr_t> &tables, Targets &targets)
 {
     // Gather relocation information:
     const SectionInfo &sections = getELFSectionInfo(elf);
@@ -319,7 +351,7 @@ static void CFGDataAnalysis(const ELF *elf, bool pic, const Instr *Is,
  * Analyze the given ELF binary for potential jump targets.
  */
 static void CFGAnalysis(const ELF *elf, const Instr *Is, size_t size,
-    std::set<intptr_t> &targets)
+    Targets &targets)
 {
     bool pic = false;
     switch (getELFType(elf))
@@ -339,9 +371,12 @@ static void CFGAnalysis(const ELF *elf, const Instr *Is, size_t size,
     CFGDataAnalysis(elf, pic, Is, size, tables, targets);
 
     // Pass #3: "Clean up" the targets.
-    std::set<intptr_t> new_targets;
-    for (auto target: targets)
+    Targets new_targets;
+    for (const auto &entry: targets)
     {
+        intptr_t target = entry.first;
+        TargetKind kind = entry.second;
+
         // Find the corresponding instruction:
         size_t i = findInstr(Is, size, target);
         if (i >= size)
@@ -374,7 +409,7 @@ static void CFGAnalysis(const ELF *elf, const Instr *Is, size_t size,
             continue;   // No target found.
         
         // Add target:
-        new_targets.insert((intptr_t)Is[i].address);
+        addTarget((intptr_t)Is[i].address, kind, new_targets);
     }
     targets.swap(new_targets);
 }
