@@ -381,6 +381,7 @@ static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs, BB *bb,
 }
 static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs)
 {
+    putc('\n', stderr);
     for (auto &entry: cfg)
     {
         auto i = bbs.find(entry.first);
@@ -389,6 +390,7 @@ static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs)
         verify(cfg, bbs, &entry.second, seen);
         putc('\n', stderr);
     }
+    putc('\n', stderr);
 }
 
 /*

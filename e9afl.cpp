@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     while (true)
     {
         int idx;
-        int opt = getopt_long_only(argc, argv, "d:o", long_options, &idx);
+        int opt = getopt_long_only(argc, argv, "do:", long_options, &idx);
         if (opt < 0)
             break;
         switch (opt)
