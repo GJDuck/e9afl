@@ -50,10 +50,6 @@ then
     cd e9patch-$VERSION
     ./build.sh
     cd ..
-    ln -f -s e9patch-$VERSION/e9patch
-    ln -f -s e9patch-$VERSION/e9tool
-    ln -f -s e9patch-$VERSION/e9compile.sh
-    ln -f -s e9patch-$VERSION/examples/stdlib.c
     echo -e "${GREEN}$0${OFF}: e9patch has been built..."
 else
 	echo -e "${GREEN}$0${OFF}: using existing e9patch..."
@@ -61,13 +57,30 @@ fi
 
 # STEP (2): build the E9Tool plugin:
 echo -e "${GREEN}$0${OFF}: building the e9afl plugin..."
-echo "g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp -I ."
-g++ -std=c++11 -fPIC -shared -o e9afl.so -O2 e9afl.cpp \
+echo "g++ -std=c++11 -fPIC -shared -o e9AFLPlugin.so -O2 e9AFLPlugin.cpp -I ."
+g++ -std=c++11 -fPIC -shared -o e9AFLPlugin.so -O2 e9AFLPlugin.cpp \
     -I e9patch-$VERSION/src/e9tool/
+strip e9AFLPlugin.so
+chmod a-x e9AFLPlugin.so
 
 # STEP (3): build the runtime:
 echo -e "${GREEN}$0${OFF}: building the e9afl runtime..."
-./e9compile.sh afl-rt.c
+e9patch-$VERSION/e9compile.sh afl-rt.c -I e9patch-$VERSION/examples/
+chmod a-x afl-rt
+
+# STEP (4): build the driver:
+g++ -std=c++11 -fPIC -pie -O2 -o e9afl e9afl.cpp
+strip e9afl
+
+# STEP (5): build the installation package:
+rm -rf install
+mkdir -p install
+cp e9patch-$VERSION/e9patch install
+cp e9patch-$VERSION/e9tool install
+mv e9AFLPlugin.so install
+mv afl-rt install
+mv e9afl install
+ln -s install/e9afl
 
 echo -e "${GREEN}$0${OFF}: done!"
 echo
