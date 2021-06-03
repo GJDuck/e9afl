@@ -1,0 +1,76 @@
+.de Sp \" Vertical space (when we can't use .PP)
+.if t .sp .5v
+.if n .sp
+..
+.de Vb \" Begin verbatim text
+.ft CW
+.nf
+.ne \\$1
+..
+.de Ve \" End verbatim text
+.ft R
+.fi
+..
+.TH "E9AFL" 1 "2021-06-02" "" "e9afl"
+.SH NAME
+\fBe9afl\fR \- binary American Fuzzy Lop (AFL) instrumentation
+.SH SYNOPSIS
+e9afl [\fB-Oblock=\fR{never|default|always}]
+      [\fB-Oselect=\fR{never|default|always}]
+      [\fB-d\fR|\fB--debug\fR]
+      [\fB-o=\fRoutput]
+      [\fB--help\fR]
+      binary
+.SH DESCRIPTION
+\fBe9afl\fR is a tool for automatically inserting American Fuzzy Lop
+(AFL) instrumentation into existing Linux x86_64 ELF binaries.
+This allows you to fuzz binaries without having to recompile the program from
+source.
+.PP
+For example, suppose that you wish to fuzz the \fBreadelf\fR program from
+binutils.
+Then we can use \fBe9afl\fR tool to automatically instrument the existing
+\fBreadelf\fR without recompilation:
+.Sp
+.Vb 1
+\&        e9afl readelf
+.Ve
+.Sp
+This will generate a modified \fBreadelf.afl\fR binary that can
+be fuzzed using \fBafl-fuzz\fR in the normal way:
+.Sp
+.Vb 1
+\&        afl\-fuzz \-i input/ \-o output/ \-\- ./readelf.afl \-a @@
+.Ve
+.Sp
+\fBe9afl\fR is built on top of the \fBe9tool\fR/\fBe9patch\fR static binary
+rewriting system.
+As such, \fBe9afl\fR should work on most ELF binaries that can be disassembled
+by \fBe9tool\fR.
+See the documentation for \fBe9tool\fR for more information.
+.SH "OPTIONS"
+.TP
+\fB-Oblock=\fR{never|default|always}
+Controls the application of the "bad block" optimization.
+Path coverage may be reduced for \fBalways\fR, and fuzzing speed may be
+reduced for \fBnever\fR.
+.TP
+\fB-Oselect=\fR{never|default|always}
+Controls the application of the "instruction selection" optimization.
+Fuzzing speed may be reduced for \fBnever\fR.
+.TP
+\fB-d\fR, \fB--debug\fR
+Print \fBe9afl\fR debugging information to \fBstderr\fR.
+.TP
+\fB-o=\fRoutput
+Use \fBoutput\fR as the output binary name.
+By default, \fBe9afl\fR uses the basename of the input binary appended with
+the string \fB".afl"\fR.
+.TP
+\fB--help\fR
+Display the help message and exit.
+.SH "SEE ALSO"
+\fIafl-fuzz\fR(1)
+.SH AUTHOR
+\fBe9afl\fR is written by Gregory J. Duck <gregory@comp.nus.edu.sg>.
+
