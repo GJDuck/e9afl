@@ -34,8 +34,6 @@
 
 using namespace e9frontend;
 
-#include "e9cfg.cpp"
-
 #define AREA_BASE   0x200000
 #define AREA_SIZE   ((size_t)1 << 16)
 
@@ -78,6 +76,12 @@ struct BB
 };
 typedef std::map<intptr_t, BB> CFG;
 #define BB_INDIRECT     (-1)
+
+/*
+ * Misc.
+ */
+typedef std::map<BB *, BB *> Paths;
+typedef std::map<intptr_t, unsigned> Ids;
 
 /*
  * To compile:
@@ -186,7 +190,7 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
          << "{\"int32\":" << stack_adjust << "},";
     code << "\"$instruction\",\"$continue\"";
 
-    sendTrampolineMessage(out, "afl", code.str().c_str());
+    sendTrampolineMessage(out, "$afl", code.str().c_str());
 
     return nullptr;
 }
@@ -217,7 +221,7 @@ static void addPredecessor(intptr_t pred, intptr_t succ,
 static void addSuccessor(intptr_t pred, intptr_t succ,
     const Targets &targets, CFG &cfg)
 {
-    auto i = targets.find(pred);
+    auto i = targets.lower_bound(pred);
     if (i == targets.end())
         return;
     auto j = cfg.find(pred);
@@ -314,17 +318,26 @@ static void buildCFG(const ELF *elf, const Instr *Is, size_t size,
 /*
  * Attempt to optimize away a bad block.
  */
-typedef std::map<BB *, BB *> Paths;
+static void optimizeBlock(CFG &cfg, BB &bb);
 static void optimizePaths(CFG &cfg, BB *pred_bb, BB *succ_bb, Paths &paths)
 {
     auto i = paths.find(succ_bb);
     if (i != paths.end())
     {
         // Multiple paths to succ_bb;
+        BB *unopt_bb = nullptr;
         if (pred_bb != nullptr)
-            pred_bb->optimized = false;
+            unopt_bb = pred_bb;
         else if (i->second != nullptr)
-            i->second->optimized = false;
+            unopt_bb = i->second;
+
+        // Note: (unopt_bb == nullptr) can happen in degenerate cases, e.g.:
+        // jne .Lnext; .Lnext: ...
+        if (unopt_bb != nullptr)
+        {
+            unopt_bb->optimized = false;
+            optimizeBlock(cfg, *unopt_bb);
+        }
         return;
     }
     paths.insert({succ_bb, pred_bb});
@@ -339,7 +352,7 @@ static void optimizePaths(CFG &cfg, BB *pred_bb, BB *succ_bb, Paths &paths)
         optimizePaths(cfg, pred_bb, succ_bb, paths);
     }
 }
-static void optimizeBlock(CFG &cfg, intptr_t entry, BB &bb)
+static void optimizeBlock(CFG &cfg, BB &bb)
 {
     if (bb.optimized)
         return;
@@ -355,39 +368,40 @@ static void optimizeBlock(CFG &cfg, intptr_t entry, BB &bb)
 /*
  * Verify the optimization is correct (for debugging).
  */
-static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs, BB *bb,
+static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BB *bb,
     std::set<BB *> &seen)
 {
+    unsigned id = ids.find(curr)->second;
     for (auto succ: bb->succs)
     {
         auto i = cfg.find(succ);
         BB *succ_bb = (i == cfg.end()? nullptr: &i->second);
         if (succ_bb == nullptr)
-            fprintf(stderr, " indirect");
+            fprintf(stderr, " BB_%u->indirect", id);
         else
-        {
-            auto j = bbs.find(succ);
-            fprintf(stderr, " BB_%u", j->second);
-        }
+            fprintf(stderr, " BB_%u->BB_%u", id, ids.find(succ)->second);
         auto r = seen.insert(succ_bb);
         if (!r.second)
         {
             putc('\n', stderr);
             error("multiple non-instrumented paths detected");
         }
-        if (succ_bb != nullptr && succ_bb->instrument < 0)
-            verify(cfg, bbs, succ_bb, seen);
+        if (succ_bb != nullptr && succ_bb->optimized)
+            verify(cfg, ids, succ, succ_bb, seen);
     }
 }
-static void verify(CFG &cfg, const std::map<intptr_t, unsigned> &bbs)
+static void verify(CFG &cfg, const Ids &ids)
 {
     putc('\n', stderr);
     for (auto &entry: cfg)
     {
-        auto i = bbs.find(entry.first);
-        fprintf(stderr, "\33[32mVERIFY\33[0m BB_%u:", i->second);
+        BB *bb = &entry.second;
+        if (bb->optimized)
+            continue;
+        fprintf(stderr, "\33[32mVERIFY\33[0m BB_%u:",
+            ids.find(entry.first)->second);
         std::set<BB *> seen;
-        verify(cfg, bbs, &entry.second, seen);
+        verify(cfg, ids, entry.first, bb, seen);
         putc('\n', stderr);
     }
     putc('\n', stderr);
@@ -463,7 +477,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
     // Step #3: Optimize away bad blocks:
     if (option_Oblock == OPTION_DEFAULT)
         for (auto &entry: cfg)
-            optimizeBlock(cfg, entry.first, entry.second);
+            optimizeBlock(cfg, entry.second);
 
     // Step #4: Collect final instrumentation points.
     for (auto &entry: cfg)
@@ -473,12 +487,12 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
     }
 
     // Setp #5: Print debugging information (if necessary)
-    std::map<intptr_t, unsigned> bbs;
+    Ids ids;
     if (option_debug == OPTION_ALWAYS)
     {
         unsigned bb = 0;
         for (const auto &entry: targets)
-            bbs.insert({entry.first, bb++});
+            ids.insert({entry.first, bb++});
     }
     for (size_t i = 0; (option_debug == OPTION_ALWAYS) && i < size; i++)
     {
@@ -488,7 +502,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
         auto j = cfg.find(I->address);
         if (j != cfg.end())
         {
-            auto l = bbs.find(I->address);
+            auto l = ids.find(I->address);
             fprintf(stderr, "\n# \33[32mBB_%u\33[0m%s%s\n", l->second,
                 (j->second.bad? " [\33[31mBAD\33[0m]": ""),
                 (j->second.bad && !j->second.optimized?
@@ -504,7 +518,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
                     fprintf(stderr, "indirect");
                     continue;
                 }
-                auto l = bbs.find(pred);
+                auto l = ids.find(pred);
                 fprintf(stderr, "BB_%u", l->second);
             }
             fprintf(stderr, "\n# succs = ");
@@ -518,7 +532,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
                     fprintf(stderr, "indirect");
                     continue;
                 }
-                auto l = bbs.find(pred);
+                auto l = ids.find(pred);
                 fprintf(stderr, "BB_%u", l->second);
             }
             putc('\n', stderr);
@@ -530,7 +544,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
             fprintf(stderr, "%lx: %s\n", I->address, I->string.instr);
     }
     if (option_debug == OPTION_ALWAYS)
-        verify(cfg, bbs);
+        verify(cfg, ids);
 }
 
 /*
@@ -595,6 +609,6 @@ extern void e9_plugin_patch_v1(FILE *out, const ELF *elf,
     metadata[2].name = nullptr;
     metadata[2].data = nullptr;
 
-    sendPatchMessage(out, "afl", info->offset, metadata);
+    sendPatchMessage(out, "$afl", info->offset, metadata);
 }
 

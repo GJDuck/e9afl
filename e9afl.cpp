@@ -207,9 +207,10 @@ int main(int argc, char **argv)
     command += path;
     command += "/e9tool\" ";
 
-    command += "--backend \"";
-    command += path;
-    command += "/e9patch\" ";
+    command += "-E '\".plt\"' ";
+    command += "-E '\".plt.got\"' ";
+    command += "-O2 ";
+    command += "--option --mem-granularity=4096 ";
 
     command += "-o \"";
     command += output;
