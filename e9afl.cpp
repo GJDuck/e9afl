@@ -103,6 +103,7 @@ static const char *getValue(Value value)
 {
     switch (value)
     {
+        default:
         case VALUE_NEVER:
             return "never";
         case VALUE_DEFAULT:
