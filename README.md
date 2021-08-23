@@ -44,6 +44,15 @@ If all goes well the output should look something like this:
      alt="AFL example">
 </p>
 
+## Troubleshooting
+
+Some instrumented binaries may crash during AFL initialization:
+
+        PROGRAM ABORT : Fork server crashed ...
+
+This is often caused by an insufficient memory limit.
+See AFL's `-m` option for more information.
+
 ## Bugs
 
 Please report bugs [here](https://github.com/GJDuck/e9afl/issues).
