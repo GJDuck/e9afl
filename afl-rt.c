@@ -29,6 +29,7 @@
  */
 
 #include "stdlib.c"
+#include "e9loader.h"
 
 #define FORKSRV_FD  198
 #define AREA_BASE   ((uint8_t *)0x200000)
@@ -170,9 +171,10 @@ static void __afl_start_forkserver(void)
 /*
  * Init.
  */
-void init(int argc, const char **argv, char **envp)
+void init(int argc, const char **argv, char **envp, void *_unused,
+    const struct e9_config_s *config)
 {
-    if (envp == NULL)
+    if ((config->flags & E9_FLAG_EXE) == 0)
     {
         /*
          * This is a shared library.  For this, we set up a dummy area so the
@@ -184,7 +186,6 @@ void init(int argc, const char **argv, char **envp)
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
         return;
     }
-
     log("fuzzing binary %s", argv[0]);
     environ = envp;
     __afl_map_shm();
