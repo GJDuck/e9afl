@@ -34,7 +34,7 @@
 
 using namespace e9frontend;
 
-#define AREA_BASE   0x200000
+#define AREA_BASE   0x1A0000
 #define AREA_SIZE   ((size_t)1 << 16)
 
 /*

@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=1c22e063f4d6cec3a927cff495a5c6c4b0d03d67
+VERSION=be65ee50cf7efbd00f70bedb50b38de9f0e4abaf
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -66,7 +66,7 @@ chmod a-x e9AFLPlugin.so
 # STEP (3): build the runtime:
 echo -e "${GREEN}$0${OFF}: building the e9afl runtime..."
 e9patch-$VERSION/e9compile.sh afl-rt.c -I e9patch-$VERSION/examples/ \
-    -I e9patch-$VERSION/src/e9patch/
+    -I e9patch-$VERSION/src/e9patch/ -DNO_GLIBC=1
 chmod a-x afl-rt
 
 # STEP (4): build the driver:

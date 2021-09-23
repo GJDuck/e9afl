@@ -32,7 +32,7 @@
 #include "e9loader.h"
 
 #define FORKSRV_FD  198
-#define AREA_BASE   ((uint8_t *)0x200000)
+#define AREA_BASE   ((uint8_t *)0x1A0000)
 #define AREA_SIZE   ((size_t)1 << 16)
 
 static FILE *log = NULL;
@@ -65,7 +65,7 @@ static void print_message(bool fatal, const char *msg, ...)
     print_message(false, "e9afl log: " msg "\n", ## __VA_ARGS__)
 
 /* SHM setup. */
-static void __afl_map_shm(void)
+static bool __afl_map_shm(void)
 {
     const char *id_str = getenv("__AFL_SHM_ID");
 
@@ -77,11 +77,13 @@ static void __afl_map_shm(void)
      */
     intptr_t afl_area_ptr = 0x0;
     uint32_t shm_id = 0;
+    bool enabled = false;
     if (id_str != NULL)
     {
         shm_id = (uint32_t)atoi(id_str);
         (void)munmap(AREA_BASE, AREA_SIZE);
         afl_area_ptr = (intptr_t)shmat(shm_id, AREA_BASE, 0);
+        enabled = true;
     }
     else
     {
@@ -99,6 +101,30 @@ static void __afl_map_shm(void)
     if (afl_area_ptr != (intptr_t)AREA_BASE)
         error("failed to map AFL area (shm_id=%s): %s", id_str,
             strerror(errno));
+    return enabled;
+}
+
+/* Init TLS if necessary. */
+#include <asm/prctl.h>
+static void __afl_init_tls(void)
+{
+    uintptr_t val;
+    int r = (int)syscall(SYS_arch_prctl, ARCH_GET_FS, &val);
+    if (r < 0)
+        error("failed to get TLS base address: %s", strerror(errno));
+    if (val == 0x0)
+    {
+        /*
+         * If glibc is not dynamically linked then %fs may be uninitialized.
+         * Since the instrumentation uses TLS, this will cause the binary to
+         * crash.  We fix this using a "dummy" TLS.
+         */
+        static uint8_t dummy_tls[128] = {0};
+        r = (int)syscall(SYS_arch_prctl, ARCH_SET_FS,
+            dummy_tls + sizeof(dummy_tls));
+        if (r < 0)
+            error("failed to set TLS base address: %s", strerror(errno));
+    }
 }
 
 /* Fork server logic. */
@@ -174,6 +200,7 @@ static void __afl_start_forkserver(void)
 void init(int argc, const char **argv, char **envp, void *_unused,
     const struct e9_config_s *config)
 {
+    __afl_init_tls();
     if ((config->flags & E9_FLAG_EXE) == 0)
     {
         /*
@@ -186,10 +213,12 @@ void init(int argc, const char **argv, char **envp, void *_unused,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
         return;
     }
-    log("fuzzing binary %s", argv[0]);
     environ = envp;
-    __afl_map_shm();
-    __afl_start_forkserver();
+    if (__afl_map_shm())
+    {
+        log("fuzzing binary %s", argv[0]);
+        __afl_start_forkserver();
+    }
 }
 
 /*
