@@ -80,6 +80,9 @@ static bool __afl_map_shm(void)
     bool enabled = false;
     if (id_str != NULL)
     {
+        const char *map_size_str = getenv("AFL_MAP_SIZE");
+        if (map_size_str != 0 && atoi(map_size_str) < AREA_SIZE)
+            error("failed to set AFL area size to %s", map_size_str);
         shm_id = (uint32_t)atoi(id_str);
         (void)munmap(AREA_BASE, AREA_SIZE);
         afl_area_ptr = (intptr_t)shmat(shm_id, AREA_BASE, 0);
