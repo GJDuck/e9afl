@@ -31,7 +31,7 @@ else
 fi
 
 NAME=e9afl
-VERSION=0.2.0
+VERSION=0.3.0
 
 if [ ! -x install/e9afl ]
 then
