@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=be65ee50cf7efbd00f70bedb50b38de9f0e4abaf
+VERSION=eecba266dddca0090cf68bdd5eefacbba258d6e2
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -111,6 +111,6 @@ echo "    ./e9afl readelf"
 echo "    mkdir -p input"
 echo "    mkdir -p output"
 echo "    head -n 1 \`which ls\` > input/exe"
-echo "    afl-fuzz -i input/ -o output/ -- ./readelf.afl -a @@"
+echo "    afl-fuzz -i input/ -o output/ -m none -- ./readelf.afl -a @@"
 echo
 
