@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=eecba266dddca0090cf68bdd5eefacbba258d6e2
+VERSION=bde8203a044c82235c8ba6692b9e72d81dad9253
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -82,6 +82,7 @@ mv e9AFLPlugin.so install
 mv afl-rt install
 mv e9afl install
 ln -s install/e9afl
+ln -s install/afl-rt
 
 echo -e "${GREEN}$0${OFF}: done!"
 echo

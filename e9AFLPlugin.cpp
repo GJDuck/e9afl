@@ -97,11 +97,11 @@ static std::set<intptr_t> instrument;
 /*
  * Initialization.
  */
-extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
+extern void *e9_plugin_init_v1(const Context *cxt)
 {
     // Make seed depend on filename.
     unsigned seed = 0;
-    const char *filename = getELFFilename(elf);
+    const char *filename = getELFFilename(cxt->elf);
     for (int i = 0; filename[i] != '\0'; i++)
         seed = 101 * seed + (unsigned)filename[i];
     srand(seed);
@@ -111,7 +111,7 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
     const int32_t afl_area_ptr = AREA_BASE;
 
     // Reserve memory used by the afl_area_ptr:
-    sendReserveMessage(out, afl_area_ptr, AREA_SIZE, /*absolute=*/true);
+    sendReserveMessage(cxt->out, afl_area_ptr, AREA_SIZE, /*absolute=*/true);
 
     const char *str = nullptr;
     std::string option_path(".");
@@ -136,7 +136,7 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
     std::string path(option_path);
     path += "/afl-rt";
     const ELF *rt = parseELF(path.c_str(), afl_rt_ptr);
-    sendELFFileMessage(out, rt);
+    sendELFFileMessage(cxt->out, rt);
 
     // Send the AFL instrumentation:
     //
@@ -179,18 +179,15 @@ extern void *e9_plugin_init_v1(FILE *out, const ELF *elf)
     // sahf
     // pop %rax  
     // lea 0x4000(%rsp),%rsp
-    // $instruction
-    // $continue
     //
     code << 0x58 << ',';
     code << 0x04 << ',' << 0x7f << ',';
     code << 0x9e << ',';
     code << 0x58 << ',';
     code << 0x48 << ',' << 0x8d << ',' << 0xa4 << ',' << 0x24 << ','
-         << "{\"int32\":" << stack_adjust << "},";
-    code << "\"$instruction\",\"$continue\"";
+         << "{\"int32\":" << stack_adjust << "}";
 
-    sendTrampolineMessage(out, "$afl", code.str().c_str());
+    sendTrampolineMessage(cxt->out, "$afl", code.str().c_str());
 
     return nullptr;
 }
@@ -550,16 +547,16 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
 /*
  * Events.
  */
-extern void e9_plugin_event_v1(FILE *out, const ELF *elf,
-    const Instr *Is, size_t size, Event event, void *context)
+extern void e9_plugin_event_v1(const Context *cxt, Event event)
 {
     switch (event)
     {
         case EVENT_DISASSEMBLY_COMPLETE:
         {
             Targets targets;
-            CFGAnalysis(elf, Is, size, targets);
-            calcInstrumentPoints(elf, Is, size, targets, instrument);
+            CFGAnalysis(cxt->elf, cxt->Is, cxt->size, targets);
+            calcInstrumentPoints(cxt->elf, cxt->Is, cxt->size, targets,
+                instrument);
             break;
         }
         default:
@@ -570,45 +567,36 @@ extern void e9_plugin_event_v1(FILE *out, const ELF *elf,
 /*
  * Matching.  Return `true' iff we should instrument this instruction.
  */
-extern intptr_t e9_plugin_match_v1(FILE *out, const ELF *elf,
-    const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
-    void *context)
+extern intptr_t e9_plugin_match_v1(const Context *cxt)
 {
-    return (instrument.find(info->address) != instrument.end());
+    return (instrument.find(cxt->I->address) != instrument.end());
 }
 
 /*
  * Patching.
  */
-extern void e9_plugin_patch_v1(FILE *out, const ELF *elf,
-    const Instr *Is, size_t size, size_t idx, const InstrInfo *info,
-    void *context)
+extern void e9_plugin_patch_v1(const Context *cxt, Phase phase)
 {
     if (option_instrument == OPTION_NEVER)
         return;
-    if (instrument.find(info->address) == instrument.end())
-        return;
 
-    Metadata metadata[3];
-    int32_t curr_loc = rand() & 0xFFFF;
-
-    metadata[0].name = "curr_loc";
-    std::string buf;
-    buf += "{\"int32\":";
-    buf += std::to_string(curr_loc);
-    buf += '}';
-    metadata[0].data = buf.c_str();
-
-    metadata[1].name = "curr_loc_1";
-    std::string buf_1;
-    buf_1 += "{\"int32\":";
-    buf_1 += std::to_string(curr_loc >> 1);
-    buf_1 += '}';
-    metadata[1].data = buf_1.c_str();
-
-    metadata[2].name = nullptr;
-    metadata[2].data = nullptr;
-
-    sendPatchMessage(out, "$afl", info->offset, metadata);
+    switch (phase)
+    {
+        case PHASE_CODE:
+            fputs("\"$afl\",", cxt->out);
+            break;
+        case PHASE_METADATA:
+        {
+            if (instrument.find(cxt->I->address) == instrument.end())
+                return;
+            int32_t curr_loc = rand() & 0xFFFF;
+            fprintf(cxt->out, "\"$curr_loc\":{\"int32\":%d},", curr_loc);
+            fprintf(cxt->out, "\"$curr_loc_1\":{\"int32\":%d},",
+                curr_loc >> 1);
+            break;
+        }
+        default:
+            break;
+    }
 }
 

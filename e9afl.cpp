@@ -221,7 +221,7 @@ int main(int argc, char **argv)
     command += path;
     command += "/e9AFLPlugin.so\").match()' ";
 
-    command += "-A 'plugin(\"";
+    command += "-P 'plugin(\"";
     command += path;
     command += "/e9AFLPlugin.so\").patch()' ";
 
