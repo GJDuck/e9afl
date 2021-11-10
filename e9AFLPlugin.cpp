@@ -51,6 +51,13 @@ static Option option_instrument = OPTION_DEFAULT;
 static Option option_Oselect    = OPTION_DEFAULT;
 static Option option_Oblock     = OPTION_DEFAULT;
 
+enum Counter
+{
+    COUNTER_CLASSIC,
+    COUNTER_NEVER_ZERO,
+    COUNTER_SATURATED
+};
+
 static Option parseOption(const char *str)
 {
     if (strcmp(str, "never") == 0)
@@ -61,6 +68,18 @@ static Option parseOption(const char *str)
         return OPTION_ALWAYS;
     error("bad option value \"%s\"; expected one of {\"never\", \"default\", "
         "\"always\"}", str);
+}
+
+static Counter parseCounter(const char *str)
+{
+    if (strcmp(str, "classic") == 0)
+        return COUNTER_CLASSIC;
+    if (strcmp(str, "neverzero") == 0)
+        return COUNTER_NEVER_ZERO;
+    if (strcmp(str, "saturated") == 0)
+        return COUNTER_SATURATED;
+    error("bad counter value \"%s\"; expected one of {\"classic\", \"neverzero\", "
+        "\"saturated\"}", str);
 }
 
 /*
@@ -115,6 +134,9 @@ extern void *e9_plugin_init_v1(const Context *cxt)
 
     const char *str = nullptr;
     std::string option_path(".");
+    Counter option_counter = COUNTER_CLASSIC;
+    if ((str = getenv("E9AFL_COUNTER")) != nullptr)
+        option_counter = parseCounter(str);
     if ((str = getenv("E9AFL_DEBUG")) != nullptr)
         option_debug = parseOption(str);
     if ((str = getenv("E9AFL_INSTRUMENT")) != nullptr)
@@ -160,14 +182,37 @@ extern void *e9_plugin_init_v1(const Context *cxt)
     //
     // mov %fs:0x48,%eax                    // mov prev_loc,%eax
     // xor $curr_loc,%eax
-    // incb afl_area_ptr(%eax)
+    // ...                                  // Increment hitcount
     // movl $(curr_loc>>1),%fs:0x48         // mov (curr_loc>>1),prev_loc
     //
     code << 0x64 << ',' << 0x8b << ',' << 0x04 << ',' << 0x25 << ','
          << 0x48 << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ',';
     code << 0x35 << ',' << "\"$curr_loc\"" << ',';
-    code << 0x67 << ',' << 0xfe << ',' << 0x80 << ','
-         << "{\"int32\":" << afl_area_ptr << "},";
+    switch (option_counter)
+    {
+        default:
+        case COUNTER_CLASSIC:
+            // incb afl_area_ptr(%eax)
+            code << 0x67 << ',' << 0xfe << ',' << 0x80 << ','
+                 << "{\"int32\":" << afl_area_ptr << "},";
+            break;
+        case COUNTER_NEVER_ZERO:
+            // addb $0x1,afl_area_ptr(%eax)
+            // adcb $0x0,afl_area_ptr(%eax)
+            code << 0x67 << ',' << 0x80 << ',' << 0x80 << ','
+                 << "{\"int32\":" << afl_area_ptr << "}," << 0x01 << ',';
+            code << 0x67 << ',' << 0x80 << ',' << 0x90 << ','
+                 << "{\"int32\":" << afl_area_ptr << "}," << 0x00 << ',';
+            break;
+        case COUNTER_SATURATED:
+            // addb $0x1,afl_area_ptr(%eax)
+            // sbbb $0x0,afl_area_ptr(%eax)
+            code << 0x67 << ',' << 0x80 << ',' << 0x80 << ','
+                 << "{\"int32\":" << afl_area_ptr << "}," << 0x01 << ',';
+            code << 0x67 << ',' << 0x80 << ',' << 0x98 << ','
+                 << "{\"int32\":" << afl_area_ptr << "}," << 0x00 << ',';
+            break;
+    }
     code << 0x64 << ',' << 0xc7 << ',' << 0x04 << ',' << 0x25 << ','
          << 0x48 << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ','
          << "\"$curr_loc_1\"" << ',';

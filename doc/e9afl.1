@@ -15,7 +15,8 @@
 .SH NAME
 \fBe9afl\fR \- binary American Fuzzy Lop (AFL) instrumentation
 .SH SYNOPSIS
-e9afl [\fB-Oblock=\fR{never|default|always}]
+e9afl [\fB--counter=\fR{classic|neverzero|saturated}]
+      [\fB-Oblock=\fR{never|default|always}]
       [\fB-Oselect=\fR{never|default|always}]
       [\fB-d\fR|\fB--debug\fR]
       [\fB-o=\fRoutput]
@@ -50,9 +51,19 @@ by \fBe9tool\fR.
 See the documentation for \fBe9tool\fR for more information.
 .SH "OPTIONS"
 .TP
+\fB--counter=\fR{classic|neverzero|saturated}
+Controls the hitcount overflow mitigation strategy.
+Here, \fBclassic\fR means no mitigation (classic AFL),
+\fBneverzero\fR means that hitcounts overflow to 1 not 0, and
+\fBsaturated\fR means that hitcounts never overflow and are clamped to the max
+possible value (255).
+Both \fBneverzero\fR and \fBsaturated\fR may reduce fuzzing speed
+but achieve better coverage.
+The default strategy is \fBclassic\fR.
+.TP
 \fB-Oblock=\fR{never|default|always}
 Controls the application of the "bad block" optimization.
-Path coverage may be reduced for \fBalways\fR, and fuzzing speed may be
+Path coverage may be reduced for \fBalways\fR and fuzzing speed may be
 reduced for \fBnever\fR.
 .TP
 \fB-Oselect=\fR{never|default|always}

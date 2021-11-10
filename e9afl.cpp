@@ -35,6 +35,7 @@
 
 enum Option
 {
+    OPTION_COUNTER,
     OPTION_OBLOCK,
     OPTION_OSELECT,
     OPTION_DEBUG,
@@ -47,6 +48,13 @@ enum Value
     VALUE_NEVER,
     VALUE_DEFAULT,
     VALUE_ALWAYS
+};
+
+enum Counter
+{
+    COUNTER_CLASSIC,
+    COUNTER_NEVER_ZERO,
+    COUNTER_SATURATED
 };
 
 static bool option_is_tty = false;
@@ -97,6 +105,21 @@ static Value parseValue(const char *str)
 }
 
 /*
+ * Parse a counter.
+ */
+static Counter parseCounter(const char *str)
+{
+    if (strcmp(str, "classic") == 0)
+        return COUNTER_CLASSIC;
+    else if (strcmp(str, "neverzero") == 0)
+        return COUNTER_NEVER_ZERO;
+    else if (strcmp(str, "saturated") == 0)
+        return COUNTER_SATURATED;
+    error("failed to parse counter \"%s\"; expected one of "
+        "{classic, neverzero, saturated}", str);
+}
+
+/*
  * Value to string.
  */
 static const char *getValue(Value value)
@@ -114,6 +137,23 @@ static const char *getValue(Value value)
 }
 
 /*
+ * Counter to string.
+ */
+static const char *getCounter(Counter counter)
+{
+    switch (counter)
+    {
+        default:
+        case COUNTER_CLASSIC:
+            return "classic";
+        case COUNTER_NEVER_ZERO:
+            return "neverzero";
+        case COUNTER_SATURATED:
+            return "saturated";
+    }
+}
+
+/*
  * Main.
  */
 int main(int argc, char **argv)
@@ -121,11 +161,13 @@ int main(int argc, char **argv)
     // Parse options:
     Value option_Oblock  = VALUE_DEFAULT,
           option_Oselect = VALUE_DEFAULT;
+    Counter option_counter = COUNTER_CLASSIC;
     bool option_debug = false;
     option_is_tty = isatty(STDERR_FILENO);
     char *option_output = nullptr;
     static const struct option long_options[] =
     {
+        {"counter", required_argument, nullptr, OPTION_COUNTER},
         {"Oblock",  required_argument, nullptr, OPTION_OBLOCK},
         {"Oselect", required_argument, nullptr, OPTION_OSELECT},
         {"debug",   no_argument,       nullptr, OPTION_DEBUG},
@@ -140,6 +182,9 @@ int main(int argc, char **argv)
             break;
         switch (opt)
         {
+            case OPTION_COUNTER:
+                option_counter = parseCounter(optarg);
+                break;
             case OPTION_OBLOCK:
                 option_Oblock = parseValue(optarg);
                 break;
@@ -159,6 +204,8 @@ int main(int argc, char **argv)
                 fprintf(stderr,
                     "\n"
                     "OPTIONS:\n"
+                    "\t--counter=classic,neverzero,saturated\n"
+                    "\t\tApply hitcount overflow mitigation.\n"
                     "\t-Oblock=never,default,always\n"
                     "\t\tApply bad block optimization.\n"
                     "\t-Oselect=never,default,always\n"
@@ -197,6 +244,7 @@ int main(int argc, char **argv)
     // Setup environment:
     std::string path;
     getExePath(path);
+    setenv("E9AFL_COUNTER", getCounter(option_counter), true);
     setenv("E9AFL_OBLOCK",  getValue(option_Oblock), true);
     setenv("E9AFL_OSELECT", getValue(option_Oselect), true);
     setenv("E9AFL_DEBUG",   (option_debug? "always": "default"), true);
