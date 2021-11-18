@@ -35,7 +35,7 @@ To fuzz the binutils `readelf` program:
         $ mkdir -p input
         $ mkdir -p output
         $ head -n 1 `which ls` > input/exe
-        $ afl-fuzz -i input/ -o output/ -- ./readelf.afl -a @@
+        $ afl-fuzz -m none -i input/ -o output/ -- ./readelf.afl -a @@
 
 If all goes well the output should look something like this:
 
@@ -52,6 +52,10 @@ Some instrumented binaries may crash during AFL initialization:
 
 This is often caused by an insufficient memory limit.
 See AFL's `-m` option for more information.
+
+## Further Reading
+
+* Xiang Gao, Gregory J. Duck, Abhik Roychoudhury, [Scalable Fuzzing of Program Binaries with E9AFL](https://www.comp.nus.edu.sg/~gregory/papers/e9afl.pdf), Automated Software Engineering (ASE), 2021
 
 ## Bugs
 

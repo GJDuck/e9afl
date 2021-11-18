@@ -112,6 +112,6 @@ echo "    ./e9afl readelf"
 echo "    mkdir -p input"
 echo "    mkdir -p output"
 echo "    head -n 1 \`which ls\` > input/exe"
-echo "    afl-fuzz -i input/ -o output/ -m none -- ./readelf.afl -a @@"
+echo "    afl-fuzz -m none -i input/ -o output/ -m none -- ./readelf.afl -a @@"
 echo
 
