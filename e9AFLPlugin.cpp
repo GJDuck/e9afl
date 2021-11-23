@@ -434,6 +434,8 @@ static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BB *bb,
 }
 static void verify(CFG &cfg, const Ids &ids)
 {
+    if (option_Oblock == OPTION_ALWAYS)
+        return;
     putc('\n', stderr);
     for (auto &entry: cfg)
     {
@@ -511,9 +513,19 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
         assert(j != cfg.end());
         j->second.instrument = target;
         j->second.bad        = (target_size < /*sizeof(jmpq)=*/5);
-        j->second.optimized  =
-            (option_Oblock != OPTION_NEVER && j->second.bad &&
-                kind == TARGET_DIRECT);
+        switch (option_Oblock)
+        {
+            case OPTION_NEVER:
+                j->second.optimized = false;
+                break;
+            case OPTION_DEFAULT:
+                // To be refined in Step #3
+                j->second.optimized = (j->second.bad && kind == TARGET_DIRECT);
+                break;
+            case OPTION_ALWAYS:
+                j->second.optimized = j->second.bad;
+                break;
+        }
     }
 
     // Step #3: Optimize away bad blocks:
