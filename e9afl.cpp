@@ -280,6 +280,9 @@ int main(int argc, char **argv)
         command += "' ";
     }
 
+    if (!option_debug)
+        command += "--option --log=false ";
+
     command += "-- \"";
     command += input;
     command += '\"';

@@ -32,7 +32,7 @@
 
 #include "e9plugin.h"
 
-using namespace e9frontend;
+using namespace e9tool;
 
 #define AREA_BASE   0x1A0000
 #define AREA_SIZE   ((size_t)1 << 16)
@@ -85,7 +85,7 @@ static Counter parseCounter(const char *str)
 /*
  * CFG
  */
-struct BB
+struct BasicBlock
 {
     std::vector<intptr_t> preds;    // Predecessor BBs
     std::vector<intptr_t> succs;    // Successor BBs
@@ -93,13 +93,13 @@ struct BB
     bool optimized      = false;    // Optimize block?
     bool bad            = false;    // Bad block?
 };
-typedef std::map<intptr_t, BB> CFG;
+typedef std::map<intptr_t, BasicBlock> CFG;
 #define BB_INDIRECT     (-1)
 
 /*
  * Misc.
  */
-typedef std::map<BB *, BB *> Paths;
+typedef std::map<BasicBlock *, BasicBlock *> Paths;
 typedef std::map<intptr_t, unsigned> Ids;
 
 /*
@@ -250,7 +250,7 @@ static void addPredecessor(intptr_t pred, intptr_t succ,
     auto j = cfg.find(succ);
     if (j == cfg.end())
     {
-        BB empty;
+        BasicBlock empty;
         auto r = cfg.insert({succ, empty});
         j = r.first;
     }
@@ -269,7 +269,7 @@ static void addSuccessor(intptr_t pred, intptr_t succ,
     auto j = cfg.find(pred);
     if (j == cfg.end())
     {
-        BB empty;
+        BasicBlock empty;
         auto r = cfg.insert({pred, empty});
         j = r.first;
     }
@@ -360,14 +360,15 @@ static void buildCFG(const ELF *elf, const Instr *Is, size_t size,
 /*
  * Attempt to optimize away a bad block.
  */
-static void optimizeBlock(CFG &cfg, BB &bb);
-static void optimizePaths(CFG &cfg, BB *pred_bb, BB *succ_bb, Paths &paths)
+static void optimizeBlock(CFG &cfg, BasicBlock &bb);
+static void optimizePaths(CFG &cfg, BasicBlock *pred_bb, BasicBlock *succ_bb,
+    Paths &paths)
 {
     auto i = paths.find(succ_bb);
     if (i != paths.end())
     {
         // Multiple paths to succ_bb;
-        BB *unopt_bb = nullptr;
+        BasicBlock *unopt_bb = nullptr;
         if (pred_bb != nullptr)
             unopt_bb = pred_bb;
         else if (i->second != nullptr)
@@ -394,7 +395,7 @@ static void optimizePaths(CFG &cfg, BB *pred_bb, BB *succ_bb, Paths &paths)
         optimizePaths(cfg, pred_bb, succ_bb, paths);
     }
 }
-static void optimizeBlock(CFG &cfg, BB &bb)
+static void optimizeBlock(CFG &cfg, BasicBlock &bb)
 {
     if (bb.optimized)
         return;
@@ -402,7 +403,7 @@ static void optimizeBlock(CFG &cfg, BB &bb)
     for (auto succ: bb.succs)
     {
         auto i = cfg.find(succ);
-        BB *succ_bb = (i == cfg.end()? nullptr: &i->second);
+        BasicBlock *succ_bb = (i == cfg.end()? nullptr: &i->second);
         optimizePaths(cfg, nullptr, succ_bb, paths);
     }
 }
@@ -410,14 +411,14 @@ static void optimizeBlock(CFG &cfg, BB &bb)
 /*
  * Verify the optimization is correct (for debugging).
  */
-static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BB *bb,
-    std::set<BB *> &seen)
+static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BasicBlock *bb,
+    std::set<BasicBlock *> &seen)
 {
     unsigned id = ids.find(curr)->second;
     for (auto succ: bb->succs)
     {
         auto i = cfg.find(succ);
-        BB *succ_bb = (i == cfg.end()? nullptr: &i->second);
+        BasicBlock *succ_bb = (i == cfg.end()? nullptr: &i->second);
         if (succ_bb == nullptr)
             fprintf(stderr, " BB_%u->indirect", id);
         else
@@ -439,12 +440,12 @@ static void verify(CFG &cfg, const Ids &ids)
     putc('\n', stderr);
     for (auto &entry: cfg)
     {
-        BB *bb = &entry.second;
+        BasicBlock *bb = &entry.second;
         if (bb->optimized)
             continue;
         fprintf(stderr, "\33[32mVERIFY\33[0m BB_%u:",
             ids.find(entry.first)->second);
-        std::set<BB *> seen;
+        std::set<BasicBlock *> seen;
         verify(cfg, ids, entry.first, bb, seen);
         putc('\n', stderr);
     }
@@ -611,9 +612,9 @@ extern void e9_plugin_event_v1(const Context *cxt, Event event)
         case EVENT_DISASSEMBLY_COMPLETE:
         {
             Targets targets;
-            CFGAnalysis(cxt->elf, cxt->Is, cxt->size, targets);
-            calcInstrumentPoints(cxt->elf, cxt->Is, cxt->size, targets,
-                instrument);
+            buildTargets(cxt->elf, cxt->Is->data(), cxt->Is->size(), targets);
+            calcInstrumentPoints(cxt->elf, cxt->Is->data(), cxt->Is->size(),
+                targets, instrument);
             break;
         }
         default:

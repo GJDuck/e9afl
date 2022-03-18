@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) 2021 National University of Singapore
+# Copyright (C) 2022 National University of Singapore
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=bde8203a044c82235c8ba6692b9e72d81dad9253
+VERSION=889a412ecdbf072d3626b1cc44e59439b030157c
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -112,6 +112,6 @@ echo "    ./e9afl readelf"
 echo "    mkdir -p input"
 echo "    mkdir -p output"
 echo "    head -n 1 \`which ls\` > input/exe"
-echo "    afl-fuzz -m none -i input/ -o output/ -m none -- ./readelf.afl -a @@"
+echo "    afl-fuzz -m none -i input/ -o output/ -- ./readelf.afl -a @@"
 echo
 
