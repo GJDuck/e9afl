@@ -30,6 +30,8 @@
 #include <set>
 #include <vector>
 
+#include <getopt.h>
+
 #include "e9plugin.h"
 
 using namespace e9tool;
@@ -47,7 +49,6 @@ enum Option
     OPTION_ALWAYS
 };
 static Option option_debug      = OPTION_DEFAULT;
-static Option option_instrument = OPTION_DEFAULT;
 static Option option_Oselect    = OPTION_DEFAULT;
 static Option option_Oblock     = OPTION_DEFAULT;
 
@@ -114,10 +115,67 @@ typedef std::map<intptr_t, unsigned> Ids;
 static std::set<intptr_t> instrument;
 
 /*
+ * Options.
+ */
+enum
+{
+    OPTION_COUNTER,
+    OPTION_OBLOCK,
+    OPTION_OSELECT,
+    OPTION_DEBUG,
+    OPTION_PATH,
+};
+
+/*
  * Initialization.
  */
 extern void *e9_plugin_init_v1(const Context *cxt)
 {
+    static const struct option long_options[] =
+    {
+        {"counter", required_argument, nullptr, OPTION_COUNTER},
+        {"Oblock",  required_argument, nullptr, OPTION_OBLOCK},
+        {"Oselect", required_argument, nullptr, OPTION_OSELECT},
+        {"debug",   no_argument,       nullptr, OPTION_DEBUG},
+        {"path",    required_argument, nullptr, OPTION_PATH},
+        {nullptr,   no_argument,       nullptr, 0}
+    };
+    std::string option_path(".");
+    Counter option_counter = COUNTER_CLASSIC;
+    optind = 1;
+    char * const *argv = cxt->argv->data();
+    int argc = (int)cxt->argv->size();
+    while (true)
+    {
+        int idx;
+        int opt = getopt_long_only(argc, argv, "Po:v", long_options, &idx);
+        if (opt < 0)
+            break;
+        switch (opt)
+        {
+            case OPTION_COUNTER:
+                option_counter = parseCounter(optarg);
+                break;
+            case OPTION_OBLOCK:
+                option_Oblock = parseOption(optarg);
+                break;
+            case OPTION_OSELECT:
+                option_Oselect = parseOption(optarg);
+                break;
+            case OPTION_DEBUG:
+                option_debug = OPTION_ALWAYS;
+                break;
+            case OPTION_PATH:
+                option_path = optarg;
+                break;
+            default:
+                error("invalid command-line options for %s", argv[0]);
+        }
+    }
+    if (option_Oblock == OPTION_ALWAYS)
+        warning("always removing AFL instrumentation for bad blocks; coverage "
+            "may be incomplete");
+
     // Make seed depend on filename.
     unsigned seed = 0;
     const char *filename = getELFFilename(cxt->elf);
@@ -131,28 +189,6 @@ extern void *e9_plugin_init_v1(const Context *cxt)
 
     // Reserve memory used by the afl_area_ptr:
     sendReserveMessage(cxt->out, afl_area_ptr, AREA_SIZE, /*absolute=*/true);
-
-    const char *str = nullptr;
-    std::string option_path(".");
-    Counter option_counter = COUNTER_CLASSIC;
-    if ((str = getenv("E9AFL_COUNTER")) != nullptr)
-        option_counter = parseCounter(str);
-    if ((str = getenv("E9AFL_DEBUG")) != nullptr)
-        option_debug = parseOption(str);
-    if ((str = getenv("E9AFL_INSTRUMENT")) != nullptr)
-        option_instrument = parseOption(str);
-    if ((str = getenv("E9AFL_OBLOCK")) != nullptr)
-        option_Oblock = parseOption(str);
-    if ((str = getenv("E9AFL_OSELECT")) != nullptr)
-        option_Oselect = parseOption(str);
-    if ((str = getenv("E9AFL_PATH")) != nullptr)
-        option_path = str;
- 
-    if (option_instrument == OPTION_NEVER)
-        return nullptr;
-    if (option_Oblock == OPTION_ALWAYS)
-        warning("always removing AFL instrumentation for bad blocks; coverage "
-            "may be incomplete");
 
     // Send the AFL runtime (if not shared object):
     std::string path(option_path);
@@ -635,9 +671,6 @@ extern intptr_t e9_plugin_match_v1(const Context *cxt)
  */
 extern void e9_plugin_patch_v1(const Context *cxt, Phase phase)
 {
-    if (option_instrument == OPTION_NEVER)
-        return;
-
     switch (phase)
     {
         case PHASE_CODE:

@@ -209,7 +209,7 @@ void init(int argc, const char **argv, char **envp, void *_unused,
         /*
          * This is a shared library.  For this, we set up a dummy area so the
          * instrumentation does not crash during program initialization.  The
-         * main executable is repsonsible for setting up AFL proper.
+         * main executable is responsible for setting up AFL proper.
          */
         (void)mmap(AREA_BASE, AREA_SIZE,
                 PROT_READ | PROT_WRITE,

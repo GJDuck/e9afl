@@ -244,11 +244,14 @@ int main(int argc, char **argv)
     // Setup environment:
     std::string path;
     getExePath(path);
-    setenv("E9AFL_COUNTER", getCounter(option_counter), true);
-    setenv("E9AFL_OBLOCK",  getValue(option_Oblock), true);
-    setenv("E9AFL_OSELECT", getValue(option_Oselect), true);
-    setenv("E9AFL_DEBUG",   (option_debug? "always": "default"), true);
-    setenv("E9AFL_PATH",    path.c_str(), true);
+    std::string plugin;
+    plugin += '\"';
+    plugin += path;
+    plugin += "/e9AFLPlugin.so\"";
+    std::string plugin_opt;
+    plugin_opt += "--plugin=";
+    plugin_opt += plugin;
+    plugin_opt += ':';
 
     // Construct command:
     std::string command;
@@ -265,14 +268,40 @@ int main(int argc, char **argv)
     command += output;
     command += "\" ";
 
-    command += "-M 'plugin(\"";
-    command += path;
-    command += "/e9AFLPlugin.so\").match()' ";
+    command += "-M 'plugin(";
+    command += plugin;
+    command += ").match()' ";
 
-    command += "-P 'plugin(\"";
-    command += path;
-    command += "/e9AFLPlugin.so\").patch()' ";
+    command += "-P 'plugin(";
+    command += plugin;
+    command += ").patch()' ";
 
+    command += plugin_opt;
+    command += "--counter=";
+    command += getCounter(option_counter);
+    command += ' ';
+
+    command += plugin_opt;
+    command += "-Oblock=";
+    command += getValue(option_Oblock);
+    command += ' ';
+
+    command += plugin_opt;
+    command += "-Oselect=";
+    command += getValue(option_Oselect);
+    command += ' ';
+
+    if (option_debug)
+    {
+        command += plugin_opt;
+        command += "--debug ";
+    }
+
+    command += plugin_opt; 
+    command += "--path='";
+    command += path;
+    command += "' ";
+ 
     for (int i = optind+1; i < argc; i++)
     {
         command += '\'';
