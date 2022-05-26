@@ -91,6 +91,7 @@ struct BasicBlock
     std::vector<intptr_t> preds;    // Predecessor BBs
     std::vector<intptr_t> succs;    // Successor BBs
     intptr_t instrument = -1;       // Instrumentation point
+    int id              = -1;       // ID
     bool optimized      = false;    // Optimize block?
     bool bad            = false;    // Bad block?
 };
@@ -98,10 +99,9 @@ typedef std::map<intptr_t, BasicBlock> CFG;
 #define BB_INDIRECT     (-1)
 
 /*
- * Misc.
+ * Paths
  */
 typedef std::map<BasicBlock *, BasicBlock *> Paths;
-typedef std::map<intptr_t, unsigned> Ids;
 
 /*
  * To compile:
@@ -274,15 +274,26 @@ extern void *e9_plugin_init_v1(const Context *cxt)
 }
 
 /*
+ * Normalize a block address.
+ */
+static intptr_t normalize(intptr_t addr, const Targets &targets)
+{
+    if (addr == BB_INDIRECT)
+        return BB_INDIRECT;
+    auto i = targets.lower_bound(addr);
+    if (i == targets.end())
+        return BB_INDIRECT;
+    return i->first;
+}
+
+/*
  * Add a predecessor block.
  */
 static void addPredecessor(intptr_t pred, intptr_t succ,
     const Targets &targets, CFG &cfg)
 {
-    auto i = targets.lower_bound(succ);
-    if (i == targets.end())
-        return;
-    succ = i->first;
+    pred = normalize(pred, targets);
+    succ = normalize(succ, targets);
     auto j = cfg.find(succ);
     if (j == cfg.end())
     {
@@ -299,9 +310,8 @@ static void addPredecessor(intptr_t pred, intptr_t succ,
 static void addSuccessor(intptr_t pred, intptr_t succ,
     const Targets &targets, CFG &cfg)
 {
-    auto i = targets.lower_bound(pred);
-    if (i == targets.end())
-        return;
+    pred = normalize(pred, targets);
+    succ = normalize(succ, targets);
     auto j = cfg.find(pred);
     if (j == cfg.end())
     {
@@ -327,7 +337,10 @@ static void buildCFG(const ELF *elf, const Instr *Is, size_t size,
         if (i >= size)
             continue;
 
-        if (kind != TARGET_DIRECT)
+        BasicBlock empty;
+        (void)cfg.insert({bb, empty});
+
+        if ((kind & TARGET_INDIRECT) != 0)
             addPredecessor(BB_INDIRECT, bb, targets, cfg);
 
         const Instr *I = Is + i;
@@ -391,6 +404,10 @@ static void buildCFG(const ELF *elf, const Instr *Is, size_t size,
             I = J;
         }
     }
+
+    int id = 0;
+    for (auto &entry: cfg)
+        entry.second.id = id++;
 }
 
 /*
@@ -447,18 +464,18 @@ static void optimizeBlock(CFG &cfg, BasicBlock &bb)
 /*
  * Verify the optimization is correct (for debugging).
  */
-static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BasicBlock *bb,
+static void verify(CFG &cfg, intptr_t curr, BasicBlock *bb,
     std::set<BasicBlock *> &seen)
 {
-    unsigned id = ids.find(curr)->second;
     for (auto succ: bb->succs)
     {
         auto i = cfg.find(succ);
         BasicBlock *succ_bb = (i == cfg.end()? nullptr: &i->second);
         if (succ_bb == nullptr)
-            fprintf(stderr, " BB_%u->indirect", id);
+            fprintf(stderr, " BB_%d->indirect", bb->id);
         else
-            fprintf(stderr, " BB_%u->BB_%u", id, ids.find(succ)->second);
+            fprintf(stderr, " BB_%d->BB_%d", bb->id,
+                cfg.find(succ)->second.id);
         auto r = seen.insert(succ_bb);
         if (!r.second)
         {
@@ -466,10 +483,10 @@ static void verify(CFG &cfg, const Ids &ids, intptr_t curr, BasicBlock *bb,
             error("multiple non-instrumented paths detected");
         }
         if (succ_bb != nullptr && succ_bb->optimized)
-            verify(cfg, ids, succ, succ_bb, seen);
+            verify(cfg, succ, succ_bb, seen);
     }
 }
-static void verify(CFG &cfg, const Ids &ids)
+static void verify(CFG &cfg)
 {
     if (option_Oblock == OPTION_ALWAYS)
         return;
@@ -479,10 +496,10 @@ static void verify(CFG &cfg, const Ids &ids)
         BasicBlock *bb = &entry.second;
         if (bb->optimized)
             continue;
-        fprintf(stderr, "\33[32mVERIFY\33[0m BB_%u:",
-            ids.find(entry.first)->second);
+        fprintf(stderr, "\33[32mVERIFY\33[0m BB_%d:",
+            cfg.find(entry.first)->second.id);
         std::set<BasicBlock *> seen;
-        verify(cfg, ids, entry.first, bb, seen);
+        verify(cfg, entry.first, bb, seen);
         putc('\n', stderr);
     }
     putc('\n', stderr);
@@ -557,7 +574,8 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
                 break;
             case OPTION_DEFAULT:
                 // To be refined in Step #3
-                j->second.optimized = (j->second.bad && kind == TARGET_DIRECT);
+                j->second.optimized =
+                    (j->second.bad && (kind & TARGET_INDIRECT) == 0);
                 break;
             case OPTION_ALWAYS:
                 j->second.optimized = j->second.bad;
@@ -578,13 +596,6 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
     }
 
     // Setp #5: Print debugging information (if necessary)
-    Ids ids;
-    if (option_debug == OPTION_ALWAYS)
-    {
-        unsigned bb = 0;
-        for (const auto &entry: targets)
-            ids.insert({entry.first, bb++});
-    }
     for (size_t i = 0; (option_debug == OPTION_ALWAYS) && i < size; i++)
     {
         InstrInfo I0, *I = &I0;
@@ -593,8 +604,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
         auto j = cfg.find(I->address);
         if (j != cfg.end())
         {
-            auto l = ids.find(I->address);
-            fprintf(stderr, "\n# \33[32mBB_%u\33[0m%s%s\n", l->second,
+            fprintf(stderr, "\n# \33[32mBB_%d\33[0m%s%s\n", cfg[I->address].id,
                 (j->second.bad? " [\33[31mBAD\33[0m]": ""),
                 (j->second.bad && !j->second.optimized?
                     " [\33[31mUNOPTIMIZED\33[0m]": ""));
@@ -609,22 +619,28 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
                     fprintf(stderr, "indirect");
                     continue;
                 }
-                auto l = ids.find(pred);
-                fprintf(stderr, "BB_%u", l->second);
+                auto l = cfg.find(pred);
+                if (l != cfg.end())
+                    fprintf(stderr, "BB_%u", l->second.id);
+                else
+                    fprintf(stderr, "%p", (void *)pred);
             }
             fprintf(stderr, "\n# succs = ");
             count = 0;
-            for (auto pred: j->second.succs)
+            for (auto succ: j->second.succs)
             {
                 if (count++ != 0)
                     putc(',', stderr);
-                if (pred == BB_INDIRECT)
+                if (succ == BB_INDIRECT)
                 {
                     fprintf(stderr, "indirect");
                     continue;
                 }
-                auto l = ids.find(pred);
-                fprintf(stderr, "BB_%u", l->second);
+                auto l = cfg.find(succ);
+                if (l != cfg.end())
+                    fprintf(stderr, "BB_%u", l->second.id);
+                else
+                    fprintf(stderr, "%p", (void *)succ);
             }
             putc('\n', stderr);
         }
@@ -635,7 +651,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
             fprintf(stderr, "%lx: %s\n", I->address, I->string.instr);
     }
     if (option_debug == OPTION_ALWAYS)
-        verify(cfg, ids);
+        verify(cfg);
 }
 
 /*
@@ -667,27 +683,22 @@ extern intptr_t e9_plugin_match_v1(const Context *cxt)
 }
 
 /*
+ * Patch template.
+ */
+extern void e9_plugin_code_v1(const Context *cxt)
+{
+    fputs("\"$afl\",", cxt->out);
+}
+
+/*
  * Patching.
  */
-extern void e9_plugin_patch_v1(const Context *cxt, Phase phase)
+extern void e9_plugin_patch_v1(const Context *cxt)
 {
-    switch (phase)
-    {
-        case PHASE_CODE:
-            fputs("\"$afl\",", cxt->out);
-            break;
-        case PHASE_METADATA:
-        {
-            if (instrument.find(cxt->I->address) == instrument.end())
-                return;
-            int32_t curr_loc = rand() & 0xFFFF;
-            fprintf(cxt->out, "\"$curr_loc\":{\"int32\":%d},", curr_loc);
-            fprintf(cxt->out, "\"$curr_loc_1\":{\"int32\":%d},",
-                curr_loc >> 1);
-            break;
-        }
-        default:
-            break;
-    }
+    if (instrument.find(cxt->I->address) == instrument.end())
+        return;
+    int32_t curr_loc = rand() & 0xFFFF;
+    fprintf(cxt->out, "\"$curr_loc\":{\"int32\":%d},", curr_loc);
+    fprintf(cxt->out, "\"$curr_loc_1\":{\"int32\":%d},", curr_loc >> 1);
 }
 
