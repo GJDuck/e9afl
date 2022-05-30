@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) 2021 National University of Singapore
+# Copyright (C) 2022 National University of Singapore
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@ else
 fi
 
 NAME=e9afl
-VERSION=0.4.0
+VERSION=0.5.0
 
 if [ ! -x install/e9afl ]
 then
