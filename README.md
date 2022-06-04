@@ -7,6 +7,12 @@ This allows binaries to be fuzzed without the need for recompilation.
 E9AFL uses [E9Patch](https://github.com/GJDuck/e9patch) to insert the
 AFL instrumentation via static binary rewriting.
 
+## Download
+
+Pre-built packages for E9AFL can be downloaded here:
+
+* [https://github.com/GJDuck/e9afl/releases](https://github.com/GJDuck/e9afl/releases)
+
 ## Building
 
 To build E9AFL, simply run the `build.sh` script:
