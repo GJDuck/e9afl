@@ -235,9 +235,9 @@ void init(int argc, const char **argv, char **envp, void *_unused,
 void entry(uint32_t curr_loc)
 {
     uint32_t prev_loc = 0;
-    asm ("mov %%fs:0x48,%0" : "=r"(prev_loc));
+    asm ("mov %%fs:0x4c,%0" : "=r"(prev_loc));
     uint16_t idx = prev_loc ^ curr_loc;
     AREA_BASE[idx]++;
-    asm ("mov %0,%%fs:0x48" : : "r"(curr_loc >> 1));
+    asm ("mov %0,%%fs:0x4c" : : "r"(curr_loc >> 1));
 }
 

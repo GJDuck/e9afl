@@ -216,13 +216,14 @@ extern void *e9_plugin_init_v1(const Context *cxt)
 
     // AFL instrumentation:
     //
-    // mov %fs:0x48,%eax                    // mov prev_loc,%eax
+    // mov %fs:0x4c,%eax                    // mov prev_loc,%eax
     // xor $curr_loc,%eax
     // ...                                  // Increment hitcount
-    // movl $(curr_loc>>1),%fs:0x48         // mov (curr_loc>>1),prev_loc
+    // movl $(curr_loc>>1),%fs:0x4c         // mov (curr_loc>>1),prev_loc
     //
+    const unsigned TLS = 0x4c;              // tcbhead_t.__glibc_unused1
     code << 0x64 << ',' << 0x8b << ',' << 0x04 << ',' << 0x25 << ','
-         << 0x48 << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ',';
+         << TLS  << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ',';
     code << 0x35 << ',' << "\"$curr_loc\"" << ',';
     switch (option_counter)
     {
@@ -250,7 +251,7 @@ extern void *e9_plugin_init_v1(const Context *cxt)
             break;
     }
     code << 0x64 << ',' << 0xc7 << ',' << 0x04 << ',' << 0x25 << ','
-         << 0x48 << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ','
+         << TLS  << ',' << 0x00 << ',' << 0x00 << ',' << 0x00 << ','
          << "\"$curr_loc_1\"" << ',';
  
     // Restore state:
