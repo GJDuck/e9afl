@@ -19,6 +19,10 @@ To build E9AFL, simply run the `build.sh` script:
 
         $ ./build.sh
 
+To build the Debian package, simply run the `install.sh` script:
+
+        $ ./install.sh
+
 ## Usage
 
 First, install `afl-fuzz`:
@@ -31,7 +35,10 @@ To use E9AFL, simply run the command:
 
 This will generate an AFL-instrumented `binary.afl` which can be
 used with `afl-fuzz`.
-See the example below.
+
+For more information on tool usage, see the man page:
+
+        $ man -l doc/e9afl.l
 
 ## Example
 

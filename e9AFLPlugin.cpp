@@ -5,7 +5,7 @@
  * |  __/\__, / ___ \|  _| | |___ 
  *  \___|  /_/_/   \_\_|   |_____|
  * 
- * Copyright (C) 2021 National University of Singapore
+ * Copyright (C) 2022 National University of Singapore
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -129,7 +129,7 @@ enum
 /*
  * Initialization.
  */
-extern void *e9_plugin_init_v1(const Context *cxt)
+extern void *e9_plugin_init(const Context *cxt)
 {
     static const struct option long_options[] =
     {
@@ -658,7 +658,7 @@ static void calcInstrumentPoints(const ELF *elf, const Instr *Is, size_t size,
 /*
  * Events.
  */
-extern void e9_plugin_event_v1(const Context *cxt, Event event)
+extern void e9_plugin_event(const Context *cxt, Event event)
 {
     switch (event)
     {
@@ -678,7 +678,7 @@ extern void e9_plugin_event_v1(const Context *cxt, Event event)
 /*
  * Matching.  Return `true' iff we should instrument this instruction.
  */
-extern intptr_t e9_plugin_match_v1(const Context *cxt)
+extern intptr_t e9_plugin_match(const Context *cxt)
 {
     return (instrument.find(cxt->I->address) != instrument.end());
 }
@@ -686,7 +686,7 @@ extern intptr_t e9_plugin_match_v1(const Context *cxt)
 /*
  * Patch template.
  */
-extern void e9_plugin_code_v1(const Context *cxt)
+extern void e9_plugin_code(const Context *cxt)
 {
     fputs("\"$afl\",", cxt->out);
 }
@@ -694,7 +694,7 @@ extern void e9_plugin_code_v1(const Context *cxt)
 /*
  * Patching.
  */
-extern void e9_plugin_patch_v1(const Context *cxt)
+extern void e9_plugin_patch(const Context *cxt)
 {
     if (instrument.find(cxt->I->address) == instrument.end())
         return;

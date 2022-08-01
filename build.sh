@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=c30c678632f4a60b2f77c8c3cc252c5d557a33e0
+VERSION=c08b98f76191221da950a34d7a7216844cd43629
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
@@ -70,7 +70,7 @@ e9patch-$VERSION/e9compile.sh afl-rt.c -I e9patch-$VERSION/examples/ \
 chmod a-x afl-rt
 
 # STEP (4): build the driver:
-g++ -std=c++11 -fPIC -pie -O2 -o e9afl e9afl.cpp
+g++ -std=c++11 -fPIC -pie -O2 -DVERSION=`cat VERSION` -o e9afl e9afl.cpp
 strip e9afl
 
 # STEP (5): build the installation package:

@@ -5,7 +5,7 @@
  * |  __/\__, / ___ \|  _| | |___ 
  *  \___|  /_/_/   \_\_|   |_____|
  * 
- * Copyright (C) 2021 National University of Singapore
+ * Copyright (C) 2022 National University of Singapore
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +33,9 @@
 
 #include <string>
 
+#define STRING(s)               STRING_2(s)
+#define STRING_2(s)             #s
+
 enum Option
 {
     OPTION_COUNTER,
@@ -40,7 +43,8 @@ enum Option
     OPTION_OSELECT,
     OPTION_DEBUG,
     OPTION_OUTPUT,
-    OPTION_HELP
+    OPTION_HELP,
+    OPTION_VERSION,
 };
 
 enum Value
@@ -172,12 +176,13 @@ int main(int argc, char **argv)
         {"Oselect", required_argument, nullptr, OPTION_OSELECT},
         {"debug",   no_argument,       nullptr, OPTION_DEBUG},
         {"help",    no_argument,       nullptr, OPTION_HELP},
+        {"version", no_argument,       nullptr, OPTION_VERSION},
         {nullptr,   no_argument,       nullptr, 0}
     };
     while (true)
     {
         int idx;
-        int opt = getopt_long_only(argc, argv, "do:", long_options, &idx);
+        int opt = getopt_long_only(argc, argv, "dho:v", long_options, &idx);
         if (opt < 0)
             break;
         switch (opt)
@@ -198,10 +203,10 @@ int main(int argc, char **argv)
                 free(option_output);
                 option_output = strdup(optarg);
                 break;
-            case OPTION_HELP:
+            case 'h': case OPTION_HELP:
                 fprintf(stderr, "usage %s [OPTIONS] binary [e9tool-OPTIONS]\n",
                     argv[0]);
-                fprintf(stderr,
+                printf(
                     "\n"
                     "OPTIONS:\n"
                     "\t--counter=classic,neverzero,saturated\n"
@@ -214,9 +219,14 @@ int main(int argc, char **argv)
                     "\t\tEnable debugging output.\n"
                     "\t-o OUTPUT\n"
                     "\t\tSet OUTPUT to be the output binary filename.\n"
-                    "\t-help\n"
-                    "\t\tPrint this message\n\n");
-                exit(0);
+                    "\t-h, --help\n"
+                    "\t\tPrint this message.\n"
+                    "\t-v, -version\n"
+                    "\t\tPrint version information.\n\n");
+                exit(EXIT_SUCCESS);
+            case 'v': case OPTION_VERSION:
+                printf("E9AFL " STRING(VERSION) "\n");
+                exit(EXIT_SUCCESS);
             default:
                 error("failed to parse command-line options; try `--help' "
                     "for more information");
