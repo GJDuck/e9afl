@@ -36,7 +36,7 @@
 
 using namespace e9tool;
 
-#define AREA_BASE   0x1A0000
+#define AREA_BASE   0x2A0000
 #define AREA_SIZE   ((size_t)1 << 16)
 
 /*

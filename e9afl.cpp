@@ -29,6 +29,8 @@
 
 #include <getopt.h>
 #include <libgen.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <string>
@@ -36,12 +38,15 @@
 #define STRING(s)               STRING_2(s)
 #define STRING_2(s)             #s
 
+#define REDFAT                  "/usr/share/redfat/"
+
 enum Option
 {
     OPTION_COUNTER,
     OPTION_OBLOCK,
     OPTION_OSELECT,
     OPTION_DEBUG,
+    OPTION_REDFAT,
     OPTION_OUTPUT,
     OPTION_HELP,
     OPTION_VERSION,
@@ -166,7 +171,7 @@ int main(int argc, char **argv)
     Value option_Oblock  = VALUE_DEFAULT,
           option_Oselect = VALUE_DEFAULT;
     Counter option_counter = COUNTER_CLASSIC;
-    bool option_debug = false;
+    bool option_redfat = false, option_debug = false;
     option_is_tty = isatty(STDERR_FILENO);
     char *option_output = nullptr;
     static const struct option long_options[] =
@@ -174,6 +179,7 @@ int main(int argc, char **argv)
         {"counter", required_argument, nullptr, OPTION_COUNTER},
         {"Oblock",  required_argument, nullptr, OPTION_OBLOCK},
         {"Oselect", required_argument, nullptr, OPTION_OSELECT},
+        {"redfat",  no_argument,       nullptr, OPTION_REDFAT},
         {"debug",   no_argument,       nullptr, OPTION_DEBUG},
         {"help",    no_argument,       nullptr, OPTION_HELP},
         {"version", no_argument,       nullptr, OPTION_VERSION},
@@ -196,6 +202,9 @@ int main(int argc, char **argv)
             case OPTION_OSELECT:
                 option_Oselect = parseValue(optarg);
                 break;
+            case OPTION_REDFAT:
+                option_redfat = true;
+                break;
             case 'd': case OPTION_DEBUG:
                 option_debug = true;
                 break;
@@ -215,6 +224,8 @@ int main(int argc, char **argv)
                     "\t\tApply bad block optimization.\n"
                     "\t-Oselect=never,default,always\n"
                     "\t\tApply selection optimization.\n"
+                    "\t--redfat\n"
+                    "\t\tApply RedFat memory safety checking.\n"
                     "\t-d, --debug\n"
                     "\t\tEnable debugging output.\n"
                     "\t-o OUTPUT\n"
@@ -307,6 +318,47 @@ int main(int argc, char **argv)
         command += "--debug ";
     }
 
+    if (option_redfat)
+    {
+        struct stat buf;
+        errno = 0;
+        if (stat(REDFAT "RedFatPlugin.so", &buf) != 0 ||
+                (buf.st_mode & S_IXUSR) == 0)
+        {
+            if (errno == ENOENT)
+                error("RedFat is not installed; the RedFat binaries can be "
+                    "downloaded here: https://github.com/GJDuck/RedFat");
+            else
+                error("failed to verify the RedFat installation");
+        }
+
+        std::string plugin("\"" REDFAT "RedFatPlugin.so\"");
+        std::string plugin_opt;
+
+        plugin_opt += "--plugin=";
+        plugin_opt += plugin;
+        plugin_opt += ':';
+
+        command += "-M 'plugin(";
+        command += plugin;
+        command += ").match()' ";
+
+        command += "-P 'plugin(";
+        command += plugin;
+        command += ").patch()' ";
+
+        command += plugin_opt;
+        command += "-Xlowfat=false ";   // lowfat may cause false detections
+
+        command += plugin_opt;
+        command += "-Xreads=true ";
+
+        command += plugin_opt;
+        command += "-path=\"";
+        command += REDFAT;
+        command += "\" ";
+    }
+
     command += plugin_opt; 
     command += "--path='";
     command += path;
@@ -331,6 +383,25 @@ int main(int argc, char **argv)
     int result = system(command.c_str());
     if (result != 0)
         error("e9tool command failed with status (%d)", result);
+
+    // Print example fuzz command:
+    printf("Generated: %s%s%s\n\n",
+        (option_is_tty? "\33[32m": ""), output.c_str(),
+        (option_is_tty? "\33[0m": ""));
+    printf("%sUSAGE%s:\n\n",
+        (option_is_tty? "\33[33m": ""), (option_is_tty? "\33[0m": ""));
+    printf("\tThe %s%s%s binary includes %s instrumentation.\n",
+        (option_is_tty? "\33[33m": ""), output.c_str(),
+        (option_is_tty? "\33[0m": ""),
+        (option_redfat? "both AFL and RedFat": "AFL"));
+    printf("\tTo use, run the following basic command template:\n\n");
+    printf("\t    %s$ %safl-fuzz -m none -i in/ -o out/ -- %s [ ... ] %s\n\n",
+        (option_is_tty? "\33[36m": ""),
+        (option_redfat?
+            "AFL_PRELOAD=/usr/share/redfat/libredfat.so \\\n\t        ": ""),
+        output.c_str(), (option_is_tty? "\33[0m": ""));
+    printf("\tSee the AFL%s documentation for more information.\n\n",
+        (option_redfat? " and RedFat": ""));
 
     return 0;
 }

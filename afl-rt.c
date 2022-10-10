@@ -32,7 +32,7 @@
 #include "e9loader.h"
 
 #define FORKSRV_FD  198
-#define AREA_BASE   ((uint8_t *)0x1A0000)
+#define AREA_BASE   ((uint8_t *)0x2A0000)
 #define AREA_SIZE   ((size_t)1 << 16)
 
 static FILE *log = NULL;

@@ -70,6 +70,12 @@ reduced for \fBnever\fR.
 Controls the application of the "instruction selection" optimization.
 Fuzzing speed may be reduced for \fBnever\fR.
 .TP
+\fB--redfat\fR
+Additionally instrument the binary using RedFat for memory error detection
+(similar to AddressSanitizer).
+Requires RedFat to be installed, see \fBhttps://github.com/GJDuck/RedFat\fR
+for more information.
+.TP
 \fB-d\fR, \fB--debug\fR
 Print \fBe9afl\fR debugging information to \fBstderr\fR.
 .TP
