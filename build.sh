@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=c08b98f76191221da950a34d7a7216844cd43629
+VERSION=960090821d753e3007cd2b568cfd5c6e74c8e4f2
 
 # STEP (1): install e9patch if necessary:
 if [ ! -x e9patch-$VERSION/e9patch ]
