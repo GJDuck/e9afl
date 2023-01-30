@@ -57,6 +57,27 @@ If all goes well the output should look something like this:
      alt="AFL example">
 </p>
 
+## Detecting Memory Errors with RedFat
+
+E9AFL can be combined with [RedFat](https://github.com/GJDuck/RedFat) for
+enhanced memory error detection during fuzzing.
+RedFat detects memory errors (bounds overflows and use-after-free) that would
+not otherwise crash the program.
+
+To enable, first install RedFat v0.3.0:
+
+* [https://github.com/GJDuck/RedFat/releases](https://github.com/GJDuck/RedFat/releases)
+
+Next, pass the `--redfat` option into E9AFL:
+
+        $ ./e9afl --redfat readelf
+
+This will instrument the binary with **both** AFL and RedFat instrumentation.
+
+To use, preload the `libredfat.so` runtime library into AFL:
+
+        $ AFL_PRELOAD=/usr/share/redfat/libredfat.so afl-fuzz -m none -i input/ -o output/ -- ./readelf.afl -a @@
+
 ## Troubleshooting
 
 Some instrumented binaries may crash during AFL initialization:
